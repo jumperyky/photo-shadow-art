@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+*.stl
+*.png
+!samples/*.png
+.venv/
+venv/
