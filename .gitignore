@@ -5,3 +5,14 @@ __pycache__/
 !samples/*.png
 .venv/
 venv/
+
+# frontend
+node_modules/
+.next/
+out/
+next-env.d.ts
+*.tsbuildinfo
+.env*.local
+
+# 一時ファイル
+.pytest_cache/

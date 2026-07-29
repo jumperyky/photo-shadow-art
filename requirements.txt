@@ -2,3 +2,7 @@ numpy>=2.0
 Pillow>=11.0
 shapely>=2.1
 trimesh>=4.6
+# trimesh のポリゴン押し出しに必要な三角形分割エンジン
+mapbox-earcut>=1.0
+# --auto-face(顔検出)用。OpenCV 5.x は haarcascade のXMLを同梱しないため 4.x 系を使う
+opencv-python-headless>=4.8,<5

@@ -1,0 +1,6 @@
+# Web APIサーバー用の依存(コア側の requirements.txt も併せてインストールすること)
+-r ../requirements.txt
+fastapi>=0.115
+uvicorn[standard]>=0.30
+python-multipart>=0.0.9
+pydantic>=2.7

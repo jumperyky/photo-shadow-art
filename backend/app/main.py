@@ -1,0 +1,315 @@
+"""
+Photo Shadow Art — Web API
+
+Next.jsのUIから line_art_stl.py の処理を呼び出すFastAPIサーバー。
+
+起動:
+    cd backend && uvicorn app.main:app --reload --port 8000
+    (または ../dev.sh)
+
+エンドポイント:
+    GET  /api/health        死活監視
+    GET  /api/config        既定値・上限・顔検出の可否
+    POST /api/upload        画像アップロード
+    GET  /api/images/{id}   アップロード済み画像の取得(クロップUI表示用)
+    POST /api/detect-face   顔検出による自動クロップ範囲の算出
+    POST /api/preview       パラメータからPNGプレビューを生成
+    POST /api/stl           STLを生成してダウンロード
+"""
+
+from __future__ import annotations
+
+import base64
+import io
+import os
+import re
+import sys
+import time
+import unicodedata
+from pathlib import Path
+from urllib.parse import quote
+
+from fastapi import Depends, FastAPI, File, HTTPException, Response, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
+
+# リポジトリ直下の line_art_stl.py を import できるようにする
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+import line_art_stl as la  # noqa: E402
+
+from . import storage  # noqa: E402
+from .schemas import (  # noqa: E402
+    ConfigResponse,
+    CropBox,
+    FaceDetectRequest,
+    FaceDetectResponse,
+    FaceRect,
+    PreviewRequest,
+    PreviewResponse,
+    SizeInfo,
+    StlRequest,
+    UploadResponse,
+)
+
+app = FastAPI(title="Photo Shadow Art API", version="1.0.0")
+
+# 開発時は localhost の Next.js から叩く。PSA_CORS_ORIGINS で上書き可能。
+_origins = os.environ.get(
+    "PSA_CORS_ORIGINS",
+    "http://localhost:3000,http://127.0.0.1:3000",
+)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[o.strip() for o in _origins.split(",") if o.strip()],
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+    expose_headers=["Content-Disposition"],
+)
+
+# 線のサンプリング密度。プレビューは粗く、STLは細かく。
+SAMPLES = {"preview": 220, "draft": 260, "normal": 420, "fine": 700}
+
+
+# ---------------------------------------------------------------------------
+# 共通ヘルパ
+# ---------------------------------------------------------------------------
+def _resolve_image(image_id: str) -> Path:
+    try:
+        return storage.get_path(image_id)
+    except storage.StorageError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+def _face_detection_available() -> bool:
+    try:
+        la._load_cascades()
+        return True
+    except la.FaceDetectionUnavailable:
+        return False
+
+
+def _resolve_crop(params, image_path: Path):
+    """
+    実際に使うクロップ範囲を決める。
+    手動クロップが指定されていればそれを優先し、
+    auto_face のときだけ顔検出を試す。検出できなくてもエラーにはせず、
+    中央クロップにフォールバックして notices で理由を返す。
+    """
+    notices: list[str] = []
+    if params.crop is not None:
+        return params.crop.as_tuple(), notices
+
+    if not params.auto_face:
+        return None, notices
+
+    try:
+        box = la.detect_face_crop_box(
+            str(image_path),
+            margin=params.face_margin,
+            aspect=params.effective_aspect,
+        )
+    except la.FaceDetectionUnavailable as exc:
+        notices.append(f"顔検出を利用できません: {exc} 中央クロップを使用します。")
+        return None, notices
+
+    if box is None:
+        notices.append("顔を検出できませんでした。中央クロップを使用します。")
+        return None, notices
+    return box, notices
+
+
+def _build(params, image_path: Path, samples: int):
+    aspect = params.effective_aspect
+    crop_box, notices = _resolve_crop(params, image_path)
+
+    try:
+        art = la.build_artwork(
+            str(image_path),
+            shape=params.effective_shape,
+            diameter=params.diameter,
+            aspect=aspect,
+            num_lines=params.lines,
+            angle_deg=params.angle,
+            min_line_width=params.min_width,
+            max_line_width=params.max_width,
+            frame_width=params.frame_width,
+            gamma=params.gamma,
+            invert=params.invert,
+            equalize=params.equalize,
+            crop_box=crop_box,
+            samples_per_line=samples,
+        )
+    except (ValueError, MemoryError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    return art, crop_box, notices
+
+
+def _size_info(art, params) -> SizeInfo:
+    return SizeInfo(
+        outer_width_mm=round(art.outer_width, 2),
+        outer_height_mm=round(art.outer_height, 2),
+        design_width_mm=round(art.design_width, 2),
+        design_height_mm=round(art.design_height, 2),
+        pitch_mm=round(art.pitch, 3),
+        line_count=art.line_count,
+        within_print_limit=(art.outer_width <= la.MAX_PRINT_SIZE_MM
+                            and art.outer_height <= la.MAX_PRINT_SIZE_MM),
+    )
+
+
+def _safe_filename(name: str | None, fallback: str = "shadow-art") -> str:
+    """Content-Disposition に載せられる安全なASCIIファイル名を作る"""
+    base = (name or "").strip()
+    base = base[:-4] if base.lower().endswith(".stl") else base
+    base = unicodedata.normalize("NFKD", base).encode("ascii", "ignore").decode()
+    base = re.sub(r"[^A-Za-z0-9._-]+", "-", base).strip("-._")
+    return (base or fallback)[:80] + ".stl"
+
+
+# ---------------------------------------------------------------------------
+# エンドポイント
+# ---------------------------------------------------------------------------
+@app.get("/api/health")
+def health():
+    return {"status": "ok"}
+
+
+@app.get("/api/config", response_model=ConfigResponse)
+def get_config():
+    return ConfigResponse(
+        max_print_size_mm=la.MAX_PRINT_SIZE_MM,
+        max_upload_bytes=storage.MAX_UPLOAD_BYTES,
+        shapes=["square", "rectangle", "circle", "hexagon"],
+        face_detection_available=_face_detection_available(),
+        defaults={
+            "shape": "square", "aspect": 1.0, "diameter": 150.0, "lines": 48,
+            "angle": 20.0, "min_width": 0.5, "max_width": 2.9,
+            "thickness": 2.0, "frame_width": 8.0, "frame_thickness": 2.0,
+            "gamma": 1.0, "invert": False, "equalize": False,
+            "auto_face": False, "face_margin": 0.6,
+        },
+    )
+
+
+@app.post("/api/upload", response_model=UploadResponse)
+async def upload(file: UploadFile = File(...)):
+    data = await file.read()
+    try:
+        stored = storage.save_upload(data)
+    except storage.StorageError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return UploadResponse(
+        image_id=stored.image_id,
+        width=stored.width,
+        height=stored.height,
+        url=f"/api/images/{stored.image_id}",
+    )
+
+
+@app.get("/api/images/{image_id}")
+def get_image(image_id: str):
+    path = _resolve_image(image_id)
+    return Response(
+        content=path.read_bytes(),
+        media_type="image/png",
+        headers={"Cache-Control": "private, max-age=3600"},
+    )
+
+
+@app.post("/api/detect-face", response_model=FaceDetectResponse)
+def detect_face(req: FaceDetectRequest):
+    path = _resolve_image(req.image_id)
+    try:
+        faces, (W, H) = la.detect_faces(str(path))
+    except la.FaceDetectionUnavailable as exc:
+        return FaceDetectResponse(available=False, detected=False, message=str(exc))
+
+    if not faces:
+        return FaceDetectResponse(
+            available=True, detected=False,
+            message="顔を検出できませんでした。手動でトリミングしてください。",
+        )
+
+    box = la.detect_face_crop_box(str(path), margin=req.margin, aspect=req.aspect)
+    if box is None:
+        return FaceDetectResponse(
+            available=True, detected=False,
+            message="顔を検出できませんでした。手動でトリミングしてください。",
+        )
+
+    l, t, r, b = box
+    return FaceDetectResponse(
+        available=True,
+        detected=True,
+        crop=CropBox(left=l, top=t, right=r, bottom=b),
+        faces=[FaceRect(x=f[0], y=f[1], width=f[2], height=f[3]) for f in faces],
+        message=f"{len(faces)}件の顔を検出しました。",
+    )
+
+
+@app.post("/api/preview", response_model=PreviewResponse)
+def preview(req: PreviewRequest):
+    started = time.perf_counter()
+    path = _resolve_image(req.image_id)
+
+    art, crop_box, notices = _build(req, path, SAMPLES["preview"])
+
+    img = la.render_preview_image(art, size=req.preview_size)
+    buf = io.BytesIO()
+    img.save(buf, format="PNG", optimize=True)
+    data_url = "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
+
+    applied = None
+    if crop_box is not None:
+        l, t, r, b = crop_box
+        applied = CropBox(left=l, top=t, right=r, bottom=b)
+
+    return PreviewResponse(
+        image=data_url,
+        warnings=art.warnings,
+        notices=notices,
+        size=_size_info(art, req),
+        applied_crop=applied,
+        elapsed_ms=int((time.perf_counter() - started) * 1000),
+    )
+
+
+@app.post("/api/stl")
+def make_stl(req: StlRequest):
+    path = _resolve_image(req.image_id)
+
+    art, _crop, _notices = _build(req, path, SAMPLES[req.quality])
+
+    try:
+        combined = la.build_mesh(
+            art, thickness=req.thickness, frame_thickness=req.frame_thickness
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    stl_bytes = combined.export(file_type="stl")
+    if isinstance(stl_bytes, str):
+        stl_bytes = stl_bytes.encode("utf-8")
+
+    ascii_name = _safe_filename(req.filename)
+    utf8_name = (req.filename or "shadow-art")
+    if not utf8_name.lower().endswith(".stl"):
+        utf8_name += ".stl"
+
+    size = _size_info(art, req)
+    return Response(
+        content=stl_bytes,
+        media_type="model/stl",
+        headers={
+            "Content-Disposition": (
+                f'attachment; filename="{ascii_name}"; '
+                f"filename*=UTF-8''{quote(utf8_name)}"
+            ),
+            "X-Outer-Size-Mm": f"{size.outer_width_mm}x{size.outer_height_mm}",
+            "X-Line-Count": str(size.line_count),
+        },
+    )
