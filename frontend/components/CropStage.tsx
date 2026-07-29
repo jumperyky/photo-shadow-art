@@ -18,7 +18,8 @@ export function CropStage({
   alt = "トリミング対象の画像",
 }: {
   src: string;
-  aspect: number;
+  /** undefined なら自由な比率で切り抜ける(リソフェイン) */
+  aspect?: number;
   crop: CropBox | null;
   onChange: (box: CropBox) => void;
   onComplete?: () => void;

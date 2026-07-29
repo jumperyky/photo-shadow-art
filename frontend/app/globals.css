@@ -619,3 +619,130 @@ select.select:focus-visible {
 .muted.over-limit {
   color: var(--warn);
 }
+
+/* ------------------------------------------------------------- mode bar */
+.mode-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 14px 24px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-elev-2);
+}
+
+@media (max-width: 820px) {
+  .mode-row {
+    padding: 12px 14px;
+  }
+}
+
+.mode-row .mode-step {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-size: 11px;
+  font-weight: 700;
+  flex: none;
+}
+
+.mode-row .mode-label {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  margin-right: 4px;
+}
+
+.mode-bar {
+  display: flex;
+  gap: 10px;
+  flex: 1;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.mode-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  flex: 1 1 300px;
+  min-width: 0;
+  padding: 11px 14px;
+  text-align: left;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--bg-elev);
+  color: var(--text-dim);
+  transition: border-color 0.14s, background 0.14s, color 0.14s;
+}
+
+.mode-card:hover {
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+
+.mode-card.active {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, var(--bg-elev));
+  color: var(--text);
+}
+
+.mode-card:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.mode-card .mode-icon {
+  flex: none;
+  display: grid;
+  place-items: center;
+  color: var(--text-faint);
+  transition: color 0.14s;
+}
+
+.mode-card.active .mode-icon {
+  color: var(--accent);
+}
+
+.mode-card .mode-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.mode-card .mode-title {
+  font-size: 14.5px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.mode-card .mode-desc {
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--text-faint);
+}
+
+/* リソフェインのプレビューは「暗い部屋で裏から照らした」見え方なので、
+   背景を市松模様ではなく暗い面にして実際の見え方に近づける */
+.preview-stage.backlit {
+  background: #0a0a0c;
+  border: 1px solid var(--border);
+}
+
+.preview-stage.backlit img {
+  /* 暗部が背景と同化して板の輪郭が分からなくなるので、うっすら縁を出す */
+  outline: 1px solid rgba(255, 226, 170, 0.22);
+  outline-offset: -1px;
+  box-shadow: 0 0 60px rgba(255, 226, 170, 0.18);
+}
+
+.preview-caption {
+  margin: 8px 0 0;
+}

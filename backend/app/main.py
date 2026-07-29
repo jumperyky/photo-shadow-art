@@ -1,7 +1,13 @@
 """
 Photo Shadow Art — Web API
 
-Next.jsのUIから line_art_stl.py の処理を呼び出すFastAPIサーバー。
+Next.jsのUIから2種類のSTL生成を呼び出すFastAPIサーバー。
+
+    shadow_art  … line_art_stl.py  (線の太さで濃淡を表現)
+    lithophane  … lithophane_stl.py (厚みで濃淡を表現)
+
+どちらも「アップロード → クロップ → パラメータ調整 → プレビュー → STL」の
+流れは共通で、リクエストの `mode` で処理を分岐する。
 
 起動:
     cd backend && uvicorn app.main:app --reload --port 8000
@@ -9,7 +15,7 @@ Next.jsのUIから line_art_stl.py の処理を呼び出すFastAPIサーバー�
 
 エンドポイント:
     GET  /api/health        死活監視
-    GET  /api/config        既定値・上限・顔検出の可否
+    GET  /api/config        既定値・上限・顔検出の可否(モードごと)
     POST /api/upload        画像アップロード
     GET  /api/images/{id}   アップロード済み画像の取得(クロップUI表示用)
     POST /api/detect-face   顔検出による自動クロップ範囲の算出
@@ -29,31 +35,37 @@ import unicodedata
 from pathlib import Path
 from urllib.parse import quote
 
-from fastapi import Depends, FastAPI, File, HTTPException, Response, UploadFile
+from fastapi import Body, FastAPI, File, HTTPException, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 
-# リポジトリ直下の line_art_stl.py を import できるようにする
+# リポジトリ直下のモジュールを import できるようにする
 REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 import line_art_stl as la  # noqa: E402
+import lithophane_stl as lp  # noqa: E402
+import photo_common as pc  # noqa: E402
 
 from . import storage  # noqa: E402
 from .schemas import (  # noqa: E402
+    AnyPreviewRequest,
+    AnyStlRequest,
     ConfigResponse,
     CropBox,
     FaceDetectRequest,
     FaceDetectResponse,
     FaceRect,
-    PreviewRequest,
+    LithophanePreviewRequest,
+    LithophaneStlRequest,
+    ModeInfo,
     PreviewResponse,
+    ShadowArtPreviewRequest,
     SizeInfo,
-    StlRequest,
     UploadResponse,
 )
 
-app = FastAPI(title="Photo Shadow Art API", version="1.0.0")
+app = FastAPI(title="Photo Shadow Art API", version="2.0.0")
 
 # 開発時は localhost の Next.js から叩く。PSA_CORS_ORIGINS で上書き可能。
 _origins = os.environ.get(
@@ -69,8 +81,25 @@ app.add_middleware(
     expose_headers=["Content-Disposition"],
 )
 
-# 線のサンプリング密度。プレビューは粗く、STLは細かく。
-SAMPLES = {"preview": 220, "draft": 260, "normal": 420, "fine": 700}
+# シャドウアートの線のサンプリング密度。プレビューは粗く、STLは細かく。
+SHADOW_SAMPLES = {"preview": 220, "draft": 260, "normal": 420, "fine": 700}
+
+# リソフェインの分割数の倍率。ユーザー指定の samples に対して品質で調整する。
+LITHO_QUALITY_SCALE = {"draft": 0.5, "normal": 1.0, "fine": 1.5}
+
+SHADOW_ART_DEFAULTS = {
+    "shape": "square", "aspect": 1.0, "diameter": 150.0, "lines": 48,
+    "angle": 20.0, "min_width": 0.5, "max_width": 2.9,
+    "thickness": 2.0, "frame_width": 8.0, "frame_thickness": 2.0,
+    "gamma": 1.0, "invert": False, "equalize": False,
+    "auto_face": False, "face_margin": 0.6,
+}
+
+LITHOPHANE_DEFAULTS = {
+    "width": 100.0, "min_thickness": 0.6, "max_thickness": 3.0,
+    "samples": 400, "curve": 0.0, "gamma": 0.8, "positive": False,
+    "equalize": False, "auto_face": False, "face_margin": 0.6,
+}
 
 
 # ---------------------------------------------------------------------------
@@ -85,18 +114,21 @@ def _resolve_image(image_id: str) -> Path:
 
 def _face_detection_available() -> bool:
     try:
-        la._load_cascades()
+        pc._load_cascades()
         return True
-    except la.FaceDetectionUnavailable:
+    except pc.FaceDetectionUnavailable:
         return False
 
 
-def _resolve_crop(params, image_path: Path):
+def _resolve_crop(params, image_path: Path, aspect: float, fallback: str):
     """
     実際に使うクロップ範囲を決める。
-    手動クロップが指定されていればそれを優先し、
-    auto_face のときだけ顔検出を試す。検出できなくてもエラーにはせず、
-    中央クロップにフォールバックして notices で理由を返す。
+    手動クロップが指定されていればそれを優先し、auto_face のときだけ顔検出を試す。
+    検出できなくてもエラーにはせず、notices で理由を返す。
+
+    fallback: 検出できなかったときに何が起きるかの説明。
+              シャドウアートは枠の比率に合わせた中央クロップ、
+              リソフェインはクロップなし(画像全体)になるため文言が異なる。
     """
     notices: list[str] = []
     if params.crop is not None:
@@ -106,24 +138,33 @@ def _resolve_crop(params, image_path: Path):
         return None, notices
 
     try:
-        box = la.detect_face_crop_box(
-            str(image_path),
-            margin=params.face_margin,
-            aspect=params.effective_aspect,
+        box = pc.detect_face_crop_box(
+            str(image_path), margin=params.face_margin, aspect=aspect,
         )
-    except la.FaceDetectionUnavailable as exc:
-        notices.append(f"顔検出を利用できません: {exc} 中央クロップを使用します。")
+    except pc.FaceDetectionUnavailable as exc:
+        notices.append(f"顔検出を利用できません: {exc} {fallback}")
         return None, notices
 
     if box is None:
-        notices.append("顔を検出できませんでした。中央クロップを使用します。")
+        notices.append(f"顔を検出できませんでした。{fallback}")
         return None, notices
     return box, notices
 
 
-def _build(params, image_path: Path, samples: int):
+def _applied_crop(crop_box):
+    if crop_box is None:
+        return None
+    l, t, r, b = crop_box
+    return CropBox(left=l, top=t, right=r, bottom=b)
+
+
+# ---------------------------------------------------------------------------
+# シャドウアート
+# ---------------------------------------------------------------------------
+def _build_shadow_art(params, image_path: Path, samples: int):
     aspect = params.effective_aspect
-    crop_box, notices = _resolve_crop(params, image_path)
+    crop_box, notices = _resolve_crop(params, image_path, aspect,
+                                      "中央クロップを使用します。")
 
     try:
         art = la.build_artwork(
@@ -148,19 +189,68 @@ def _build(params, image_path: Path, samples: int):
     return art, crop_box, notices
 
 
-def _size_info(art, params) -> SizeInfo:
+def _shadow_art_size(art, params) -> SizeInfo:
+    depth = max(params.thickness, params.frame_thickness)
     return SizeInfo(
         outer_width_mm=round(art.outer_width, 2),
         outer_height_mm=round(art.outer_height, 2),
+        outer_depth_mm=round(depth, 2),
         design_width_mm=round(art.design_width, 2),
         design_height_mm=round(art.design_height, 2),
+        within_print_limit=(art.outer_width <= pc.MAX_PRINT_SIZE_MM
+                            and art.outer_height <= pc.MAX_PRINT_SIZE_MM),
         pitch_mm=round(art.pitch, 3),
         line_count=art.line_count,
-        within_print_limit=(art.outer_width <= la.MAX_PRINT_SIZE_MM
-                            and art.outer_height <= la.MAX_PRINT_SIZE_MM),
     )
 
 
+# ---------------------------------------------------------------------------
+# リソフェイン
+# ---------------------------------------------------------------------------
+def _build_lithophane(params, image_path: Path, samples: int):
+    # リソフェインは比率が自由なので、顔検出も正方形基準で行う
+    crop_box, notices = _resolve_crop(params, image_path, 1.0,
+                                      "画像全体を使用します。")
+
+    try:
+        litho = lp.build_lithophane(
+            str(image_path),
+            width_mm=params.width,
+            min_thickness=params.min_thickness,
+            max_thickness=params.max_thickness,
+            samples=samples,
+            gamma=params.gamma,
+            positive=params.positive,
+            equalize=params.equalize,
+            crop_box=crop_box,
+            curve_deg=params.curve,
+        )
+    except (ValueError, MemoryError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    return litho, crop_box, notices
+
+
+def _lithophane_size(litho) -> SizeInfo:
+    fw, fh, fd = litho.footprint()
+    return SizeInfo(
+        outer_width_mm=round(fw, 2),
+        outer_height_mm=round(fh, 2),
+        outer_depth_mm=round(fd, 2),
+        design_width_mm=round(litho.width_mm, 2),
+        design_height_mm=round(litho.height_mm, 2),
+        within_print_limit=(max(fw, fh, fd) <= pc.MAX_PRINT_SIZE_MM),
+        min_thickness_mm=round(litho.min_thickness, 3),
+        max_thickness_mm=round(litho.max_thickness, 3),
+        grid=f"{litho.samples_x} x {litho.samples_z}",
+        face_count=litho.face_count,
+        radius_mm=round(litho.radius_mm, 2) if litho.curve_deg > 0 else None,
+    )
+
+
+# ---------------------------------------------------------------------------
+# その他ヘルパ
+# ---------------------------------------------------------------------------
 def _safe_filename(name: str | None, fallback: str = "shadow-art") -> str:
     """Content-Disposition に載せられる安全なASCIIファイル名を作る"""
     base = (name or "").strip()
@@ -168,6 +258,40 @@ def _safe_filename(name: str | None, fallback: str = "shadow-art") -> str:
     base = unicodedata.normalize("NFKD", base).encode("ascii", "ignore").decode()
     base = re.sub(r"[^A-Za-z0-9._-]+", "-", base).strip("-._")
     return (base or fallback)[:80] + ".stl"
+
+
+def _png_data_url(img) -> str:
+    buf = io.BytesIO()
+    img.save(buf, format="PNG", optimize=True)
+    return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
+
+
+def _stl_response(mesh, req, size: SizeInfo) -> Response:
+    stl_bytes = mesh.export(file_type="stl")
+    if isinstance(stl_bytes, str):
+        stl_bytes = stl_bytes.encode("utf-8")
+
+    fallback = "lithophane" if req.mode == "lithophane" else "shadow-art"
+    ascii_name = _safe_filename(req.filename, fallback)
+    utf8_name = req.filename or fallback
+    if not utf8_name.lower().endswith(".stl"):
+        utf8_name += ".stl"
+
+    return Response(
+        content=stl_bytes,
+        media_type="model/stl",
+        headers={
+            "Content-Disposition": (
+                f'attachment; filename="{ascii_name}"; '
+                f"filename*=UTF-8''{quote(utf8_name)}"
+            ),
+            "X-Mode": req.mode,
+            "X-Outer-Size-Mm": (
+                f"{size.outer_width_mm}x{size.outer_height_mm}x{size.outer_depth_mm}"
+            ),
+            "X-Face-Count": str(len(mesh.faces)),
+        },
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -181,17 +305,31 @@ def health():
 @app.get("/api/config", response_model=ConfigResponse)
 def get_config():
     return ConfigResponse(
-        max_print_size_mm=la.MAX_PRINT_SIZE_MM,
+        max_print_size_mm=pc.MAX_PRINT_SIZE_MM,
         max_upload_bytes=storage.MAX_UPLOAD_BYTES,
         shapes=["square", "rectangle", "circle", "hexagon"],
         face_detection_available=_face_detection_available(),
-        defaults={
-            "shape": "square", "aspect": 1.0, "diameter": 150.0, "lines": 48,
-            "angle": 20.0, "min_width": 0.5, "max_width": 2.9,
-            "thickness": 2.0, "frame_width": 8.0, "frame_thickness": 2.0,
-            "gamma": 1.0, "invert": False, "equalize": False,
-            "auto_face": False, "face_margin": 0.6,
-        },
+        modes=[
+            ModeInfo(
+                id="shadow_art",
+                label="シャドウアート",
+                description=(
+                    "線の太さで濃淡を表現します。枠の形を選べて、"
+                    "光を当てなくても模様として成立します。"
+                ),
+                defaults=SHADOW_ART_DEFAULTS,
+            ),
+            ModeInfo(
+                id="lithophane",
+                label="リソフェイン",
+                description=(
+                    "厚みで濃淡を表現します。裏から光を当てると写真が浮かび上がります。"
+                    "連続階調が出せるかわりに、必ず背面照明が必要です。"
+                ),
+                defaults=LITHOPHANE_DEFAULTS,
+            ),
+        ],
+        defaults=SHADOW_ART_DEFAULTS,
     )
 
 
@@ -224,8 +362,8 @@ def get_image(image_id: str):
 def detect_face(req: FaceDetectRequest):
     path = _resolve_image(req.image_id)
     try:
-        faces, (W, H) = la.detect_faces(str(path))
-    except la.FaceDetectionUnavailable as exc:
+        faces, (W, H) = pc.detect_faces(str(path))
+    except pc.FaceDetectionUnavailable as exc:
         return FaceDetectResponse(available=False, detected=False, message=str(exc))
 
     if not faces:
@@ -234,7 +372,7 @@ def detect_face(req: FaceDetectRequest):
             message="顔を検出できませんでした。手動でトリミングしてください。",
         )
 
-    box = la.detect_face_crop_box(str(path), margin=req.margin, aspect=req.aspect)
+    box = pc.detect_face_crop_box(str(path), margin=req.margin, aspect=req.aspect)
     if box is None:
         return FaceDetectResponse(
             available=True, detected=False,
@@ -252,64 +390,83 @@ def detect_face(req: FaceDetectRequest):
 
 
 @app.post("/api/preview", response_model=PreviewResponse)
-def preview(req: PreviewRequest):
+def preview(req: AnyPreviewRequest = Body(..., discriminator="mode")):
     started = time.perf_counter()
     path = _resolve_image(req.image_id)
 
-    art, crop_box, notices = _build(req, path, SAMPLES["preview"])
-
-    img = la.render_preview_image(art, size=req.preview_size)
-    buf = io.BytesIO()
-    img.save(buf, format="PNG", optimize=True)
-    data_url = "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
-
-    applied = None
-    if crop_box is not None:
-        l, t, r, b = crop_box
-        applied = CropBox(left=l, top=t, right=r, bottom=b)
+    if isinstance(req, ShadowArtPreviewRequest):
+        art, crop_box, notices = _build_shadow_art(
+            req, path, SHADOW_SAMPLES["preview"])
+        image = la.render_preview_image(art, size=req.preview_size)
+        warnings = art.warnings
+        size = _shadow_art_size(art, req)
+    else:
+        # プレビューは分割数を抑えて高速に(見た目の階調は分割数に依存しない)
+        samples = min(req.samples, req.preview_size)
+        litho, crop_box, notices = _build_lithophane(req, path, samples)
+        image = lp.render_preview_image(litho, size=req.preview_size)
+        # 警告は実際の分割数(=ユーザー指定)で出したいので作り直す
+        warnings = [w for w in litho.warnings if "分割数" not in w]
+        warnings += _litho_face_count_warning(req, litho)
+        size = _lithophane_size(litho)
+        size.grid = _projected_grid(req, litho)
+        size.face_count = _projected_face_count(req, litho)
 
     return PreviewResponse(
-        image=data_url,
-        warnings=art.warnings,
+        mode=req.mode,
+        image=_png_data_url(image),
+        warnings=warnings,
         notices=notices,
-        size=_size_info(art, req),
-        applied_crop=applied,
+        size=size,
+        applied_crop=_applied_crop(crop_box),
         elapsed_ms=int((time.perf_counter() - started) * 1000),
     )
 
 
+def _projected_grid(req: LithophanePreviewRequest, litho) -> str:
+    """プレビューは粗く作るので、STL出力時の格子サイズを計算して見せる"""
+    nx = req.samples
+    nz = max(8, round(nx * litho.samples_z / litho.samples_x))
+    return f"{nx} x {nz}"
+
+
+def _projected_face_count(req: LithophanePreviewRequest, litho) -> int:
+    nx = req.samples
+    nz = max(8, round(nx * litho.samples_z / litho.samples_x))
+    return 4 * (nx - 1) * (nz - 1) + 4 * ((nx - 1) + (nz - 1))
+
+
+def _litho_face_count_warning(req, litho):
+    faces = _projected_face_count(req, litho)
+    if faces <= lp.FACE_COUNT_WARN:
+        return []
+    return [
+        f"警告: 分割数が多く、三角形が約{faces/1e6:.1f}M個になります。"
+        f"STLが数百MBになりスライサーが重くなる恐れがあります。"
+        f"分割数を下げることを検討してください。"
+    ]
+
+
 @app.post("/api/stl")
-def make_stl(req: StlRequest):
+def make_stl(req: AnyStlRequest = Body(..., discriminator="mode")):
     path = _resolve_image(req.image_id)
 
-    art, _crop, _notices = _build(req, path, SAMPLES[req.quality])
+    if isinstance(req, LithophaneStlRequest):
+        scale = LITHO_QUALITY_SCALE[req.quality]
+        samples = int(max(8, min(1200, round(req.samples * scale))))
+        litho, _crop, _notices = _build_lithophane(req, path, samples)
+        try:
+            mesh = lp.build_mesh(litho)
+        except (RuntimeError, MemoryError) as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        return _stl_response(mesh, req, _lithophane_size(litho))
 
+    art, _crop, _notices = _build_shadow_art(
+        req, path, SHADOW_SAMPLES[req.quality])
     try:
-        combined = la.build_mesh(
+        mesh = la.build_mesh(
             art, thickness=req.thickness, frame_thickness=req.frame_thickness
         )
     except RuntimeError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-
-    stl_bytes = combined.export(file_type="stl")
-    if isinstance(stl_bytes, str):
-        stl_bytes = stl_bytes.encode("utf-8")
-
-    ascii_name = _safe_filename(req.filename)
-    utf8_name = (req.filename or "shadow-art")
-    if not utf8_name.lower().endswith(".stl"):
-        utf8_name += ".stl"
-
-    size = _size_info(art, req)
-    return Response(
-        content=stl_bytes,
-        media_type="model/stl",
-        headers={
-            "Content-Disposition": (
-                f'attachment; filename="{ascii_name}"; '
-                f"filename*=UTF-8''{quote(utf8_name)}"
-            ),
-            "X-Outer-Size-Mm": f"{size.outer_width_mm}x{size.outer_height_mm}",
-            "X-Line-Count": str(size.line_count),
-        },
-    )
+    return _stl_response(mesh, req, _shadow_art_size(art, req))

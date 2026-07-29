@@ -1,10 +1,12 @@
 import type {
   AppConfig,
-  ArtParams,
   CropBox,
   FaceDetectResponse,
+  LithophaneParams,
+  Mode,
   PreviewResponse,
   Quality,
+  ShadowArtParams,
   UploadResponse,
 } from "./types";
 
@@ -79,42 +81,75 @@ export function detectFace(
   return postJson("/api/detect-face", { image_id: imageId, aspect, margin }, signal);
 }
 
-/** サーバーに渡すリクエストボディを組み立てる(shape依存の正規化もここで行う) */
-function requestBody(imageId: string, params: ArtParams, crop: CropBox | null) {
-  const isBox = params.shape === "square" || params.shape === "rectangle";
+/**
+ * サーバーに渡すリクエストボディを組み立てる。
+ * バックエンドは `mode` でスキーマを判別するので、方式ごとに必要な項目だけ送る。
+ */
+function requestBody(
+  mode: Mode,
+  imageId: string,
+  shadow: ShadowArtParams,
+  litho: LithophaneParams,
+  crop: CropBox | null,
+) {
+  if (mode === "lithophane") {
+    return {
+      mode,
+      image_id: imageId,
+      crop,
+      auto_face: litho.auto_face,
+      face_margin: litho.face_margin,
+      gamma: litho.gamma,
+      equalize: litho.equalize,
+      width: litho.width,
+      min_thickness: litho.min_thickness,
+      max_thickness: litho.max_thickness,
+      samples: litho.samples,
+      curve: litho.curve,
+      positive: litho.positive,
+    };
+  }
+
+  const isBox = shadow.shape === "square" || shadow.shape === "rectangle";
   return {
+    mode,
     image_id: imageId,
-    shape: params.shape,
-    sides: params.sides,
-    // 円/六角形/n角形は常に等方なので aspect は 1 に固定して送る
-    aspect: isBox && params.sides === null ? params.aspect : 1.0,
-    diameter: params.diameter,
-    lines: params.lines,
-    angle: params.angle,
-    min_width: params.min_width,
-    max_width: params.max_width,
-    thickness: params.thickness,
-    frame_width: params.frame_width,
-    frame_thickness: params.frame_thickness,
-    gamma: params.gamma,
-    invert: params.invert,
-    equalize: params.equalize,
     crop,
-    auto_face: params.auto_face,
-    face_margin: params.face_margin,
+    auto_face: shadow.auto_face,
+    face_margin: shadow.face_margin,
+    gamma: shadow.gamma,
+    equalize: shadow.equalize,
+    shape: shadow.shape,
+    sides: shadow.sides,
+    // 円/六角形/n角形は常に等方なので aspect は 1 に固定して送る
+    aspect: isBox && shadow.sides === null ? shadow.aspect : 1.0,
+    diameter: shadow.diameter,
+    lines: shadow.lines,
+    angle: shadow.angle,
+    min_width: shadow.min_width,
+    max_width: shadow.max_width,
+    thickness: shadow.thickness,
+    frame_width: shadow.frame_width,
+    frame_thickness: shadow.frame_thickness,
+    invert: shadow.invert,
   };
 }
 
 export function fetchPreview(
+  mode: Mode,
   imageId: string,
-  params: ArtParams,
+  shadow: ShadowArtParams,
+  litho: LithophaneParams,
   crop: CropBox | null,
   previewSize: number,
   signal?: AbortSignal,
 ): Promise<PreviewResponse> {
   return postJson(
     "/api/preview",
-    { ...requestBody(imageId, params, crop), preview_size: previewSize },
+    {
+      ...requestBody(mode, imageId, shadow, litho, crop),
+      preview_size: previewSize,
+    },
     signal,
   );
 }
@@ -125,8 +160,10 @@ export interface StlResult {
 }
 
 export async function fetchStl(
+  mode: Mode,
   imageId: string,
-  params: ArtParams,
+  shadow: ShadowArtParams,
+  litho: LithophaneParams,
   crop: CropBox | null,
   filename: string,
   quality: Quality,
@@ -135,7 +172,7 @@ export async function fetchStl(
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      ...requestBody(imageId, params, crop),
+      ...requestBody(mode, imageId, shadow, litho, crop),
       filename,
       quality,
     }),

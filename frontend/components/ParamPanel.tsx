@@ -2,7 +2,7 @@
 
 import { Message, Segmented, Slider, Toggle } from "./Controls";
 import { MAX_PRINT_SIZE_MM, SHAPE_LABELS } from "@/lib/defaults";
-import type { ArtParams, ShapeName } from "@/lib/types";
+import type { ShadowArtParams, ShapeName } from "@/lib/types";
 
 /**
  * line_art_stl.py のパラメータをひと通り調整できるパネル。
@@ -17,8 +17,8 @@ export function ParamPanel({
   onDetectFace,
   faceMessage,
 }: {
-  params: ArtParams;
-  onChange: (patch: Partial<ArtParams>) => void;
+  params: ShadowArtParams;
+  onChange: (patch: Partial<ShadowArtParams>) => void;
   onReset: () => void;
   faceAvailable: boolean;
   faceBusy: boolean;

@@ -1,9 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Message, Panel } from "@/components/Controls";
 import { CropStage } from "@/components/CropStage";
 import { Dropzone } from "@/components/Dropzone";
+import { LithophaneParamPanel } from "@/components/LithophaneParamPanel";
+import { ModeSelector } from "@/components/ModeSelector";
 import { ParamPanel } from "@/components/ParamPanel";
 import { PreviewStage } from "@/components/PreviewStage";
 import {
@@ -19,22 +21,50 @@ import {
   withStlExtension,
   writeToTarget,
 } from "@/lib/api";
-import { DEFAULT_PARAMS, centeredCrop, cropAspect } from "@/lib/defaults";
+import {
+  DEFAULT_LITHOPHANE,
+  DEFAULT_SHADOW_ART,
+  MODE_LABELS,
+  centeredCrop,
+  cropAspect,
+} from "@/lib/defaults";
 import type {
   AppConfig,
-  ArtParams,
   CropBox,
+  LithophaneParams,
+  Mode,
+  ModeInfo,
   PreviewResponse,
   Quality,
+  ShadowArtParams,
   UploadResponse,
 } from "@/lib/types";
 
 const PREVIEW_DEBOUNCE_MS = 280;
 
+const FALLBACK_MODES: ModeInfo[] = [
+  {
+    id: "shadow_art",
+    label: "シャドウアート",
+    description: "線の太さで濃淡を表現します。",
+    defaults: {},
+  },
+  {
+    id: "lithophane",
+    label: "リソフェイン",
+    description: "厚みで濃淡を表現します。裏から光を当てて見ます。",
+    defaults: {},
+  },
+];
+
 export default function Page() {
   const [config, setConfig] = useState<AppConfig | null>(null);
+  const [mode, setMode] = useState<Mode>("shadow_art");
   const [image, setImage] = useState<UploadResponse | null>(null);
-  const [params, setParams] = useState<ArtParams>(DEFAULT_PARAMS);
+
+  // 方式ごとにパラメータを保持する。切り替えても調整内容が失われない。
+  const [shadowParams, setShadowParams] = useState<ShadowArtParams>(DEFAULT_SHADOW_ART);
+  const [lithoParams, setLithoParams] = useState<LithophaneParams>(DEFAULT_LITHOPHANE);
   const [crop, setCrop] = useState<CropBox | null>(null);
 
   const [preview, setPreview] = useState<PreviewResponse | null>(null);
@@ -57,7 +87,9 @@ export default function Page() {
   // レンダー中に window を見るとSSRの結果と食い違ってハイドレーションが壊れる。
   const [canPickSaveLocation, setCanPickSaveLocation] = useState(false);
 
-  const aspect = cropAspect(params);
+  const litho = mode === "lithophane";
+  const common = litho ? lithoParams : shadowParams;
+  const aspect = cropAspect(mode, shadowParams);
   const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
@@ -74,8 +106,11 @@ export default function Page() {
       );
   }, []);
 
-  const patch = useCallback((p: Partial<ArtParams>) => {
-    setParams((prev) => ({ ...prev, ...p }));
+  const patchShadow = useCallback((p: Partial<ShadowArtParams>) => {
+    setShadowParams((prev) => ({ ...prev, ...p }));
+  }, []);
+  const patchLitho = useCallback((p: Partial<LithophaneParams>) => {
+    setLithoParams((prev) => ({ ...prev, ...p }));
   }, []);
 
   // -------------------------------------------------------------- 顔検出
@@ -87,9 +122,7 @@ export default function Page() {
         const res = await detectFace(imageId, forAspect, margin);
         if (res.crop) setCrop(res.crop);
         setFaceMessage(
-          res.detected
-            ? `${res.message} トリミング枠を顔に合わせました。`
-            : res.message,
+          res.detected ? `${res.message} トリミング枠を顔に合わせました。` : res.message,
         );
       } catch (e) {
         setFaceMessage(`顔検出に失敗しました: ${(e as Error).message}`);
@@ -98,6 +131,12 @@ export default function Page() {
       }
     },
     [],
+  );
+
+  // 顔検出に渡す比率。リソフェインは比率が自由なので正方形基準で探す。
+  const faceAspect = useMemo(
+    () => (aspect === undefined ? 1 : 1 / aspect),
+    [aspect],
   );
 
   // ------------------------------------------------------------ アップロード
@@ -112,10 +151,9 @@ export default function Page() {
         setImage(res);
         setPreview(null);
         setCrop(centeredCrop(res.width, res.height, aspect));
-        setFilename(suggestName(file.name));
-        if (params.auto_face && config?.face_detection_available) {
-          // 「高さ÷幅」で渡す点に注意（UIのアスペクトは 幅÷高さ）
-          void runFaceDetect(res.image_id, 1 / aspect, params.face_margin);
+        setFilename(suggestName(file.name, mode));
+        if (common.auto_face && config?.face_detection_available) {
+          void runFaceDetect(res.image_id, faceAspect, common.face_margin);
         }
       } catch (e) {
         setUploadError((e as Error).message);
@@ -123,7 +161,7 @@ export default function Page() {
         setUploadBusy(false);
       }
     },
-    [aspect, params.auto_face, params.face_margin, config, runFaceDetect],
+    [aspect, faceAspect, mode, common.auto_face, common.face_margin, config, runFaceDetect],
   );
 
   // 形状の比率が変わったらトリミング枠を作り直す（自動検出中なら再検出）
@@ -131,26 +169,26 @@ export default function Page() {
   useEffect(() => {
     if (!image || prevAspectRef.current === aspect) return;
     prevAspectRef.current = aspect;
-    if (params.auto_face && config?.face_detection_available) {
-      void runFaceDetect(image.image_id, 1 / aspect, params.face_margin);
+    if (common.auto_face && config?.face_detection_available) {
+      void runFaceDetect(image.image_id, faceAspect, common.face_margin);
     } else {
       setCrop(centeredCrop(image.width, image.height, aspect));
     }
-  }, [aspect, image, params.auto_face, params.face_margin, config, runFaceDetect]);
+  }, [aspect, faceAspect, image, common.auto_face, common.face_margin, config, runFaceDetect]);
 
   // 顔検出のON/マージン変更に追従
-  const faceKey = params.auto_face ? `on:${params.face_margin}` : "off";
+  const faceKey = common.auto_face ? `${mode}:on:${common.face_margin}` : `${mode}:off`;
   const prevFaceKeyRef = useRef(faceKey);
   useEffect(() => {
     if (prevFaceKeyRef.current === faceKey) return;
     prevFaceKeyRef.current = faceKey;
     if (!image) return;
-    if (params.auto_face && config?.face_detection_available) {
-      void runFaceDetect(image.image_id, 1 / aspect, params.face_margin);
+    if (common.auto_face && config?.face_detection_available) {
+      void runFaceDetect(image.image_id, faceAspect, common.face_margin);
     } else {
       setFaceMessage(null);
     }
-  }, [faceKey, image, params.auto_face, params.face_margin, aspect, config, runFaceDetect]);
+  }, [faceKey, image, common.auto_face, common.face_margin, faceAspect, config, runFaceDetect]);
 
   // ------------------------------------------------------------ プレビュー
   useEffect(() => {
@@ -161,7 +199,7 @@ export default function Page() {
       abortRef.current = ac;
       setPreviewBusy(true);
 
-      fetchPreview(image.image_id, params, crop, 760, ac.signal)
+      fetchPreview(mode, image.image_id, shadowParams, lithoParams, crop, 760, ac.signal)
         .then((res) => {
           setPreview(res);
           setPreviewError(null);
@@ -176,9 +214,22 @@ export default function Page() {
     }, PREVIEW_DEBOUNCE_MS);
 
     return () => clearTimeout(timer);
-  }, [image, params, crop]);
+  }, [mode, image, shadowParams, lithoParams, crop]);
 
   useEffect(() => () => abortRef.current?.abort(), []);
+
+  // ------------------------------------------------------------ モード切替
+  const handleModeChange = useCallback(
+    (next: Mode) => {
+      if (next === mode) return;
+      setMode(next);
+      setPreview(null);
+      setStlDone(null);
+      setStlError(null);
+      setFilename((prev) => swapModeSuffix(prev, mode, next));
+    },
+    [mode],
+  );
 
   // ------------------------------------------------------------------ STL
   const handleExport = useCallback(async () => {
@@ -194,8 +245,10 @@ export default function Page() {
     setStlDone(null);
     try {
       const { blob, filename: name } = await fetchStl(
+        mode,
         image.image_id,
-        params,
+        shadowParams,
+        lithoParams,
         crop,
         filename,
         quality,
@@ -209,25 +262,32 @@ export default function Page() {
     } finally {
       setStlBusy(false);
     }
-  }, [image, params, crop, filename, quality]);
+  }, [mode, image, shadowParams, lithoParams, crop, filename, quality]);
 
   const faceAvailable = config?.face_detection_available ?? false;
+  const modes = config?.modes ?? FALLBACK_MODES;
 
   return (
     <div className="app">
       <header className="header">
         <h1>Photo Shadow Art</h1>
-        <span className="sub">写真 → 線幅で濃淡を表現する3DプリントSTL</span>
+        <span className="sub">写真 → 3DプリントSTL</span>
         <span className="spacer" />
         <span className="muted">
           最大造形サイズ {config?.max_print_size_mm ?? 1800}mm
         </span>
       </header>
 
+      <div className="mode-row">
+        <span className="mode-step">1</span>
+        <span className="mode-label">つくり方を選ぶ</span>
+        <ModeSelector modes={modes} value={mode} onChange={handleModeChange} />
+      </div>
+
       <main className="workspace">
-        {/* ------------------------------------------------ 1. 写真 */}
+        {/* ------------------------------------------------ 2. 写真 */}
         <div className="col">
-          <Panel step={1} title="写真とトリミング" flush={!!image}>
+          <Panel step={2} title="写真とトリミング" flush={!!image}>
             {image ? (
               <>
                 <CropStage
@@ -240,9 +300,7 @@ export default function Page() {
                   <button
                     type="button"
                     className="btn small"
-                    onClick={() =>
-                      setCrop(centeredCrop(image.width, image.height, aspect))
-                    }
+                    onClick={() => setCrop(centeredCrop(image.width, image.height, aspect))}
                   >
                     枠をリセット
                   </button>
@@ -252,7 +310,7 @@ export default function Page() {
                       className="btn small"
                       disabled={faceBusy}
                       onClick={() =>
-                        runFaceDetect(image.image_id, 1 / aspect, params.face_margin)
+                        runFaceDetect(image.image_id, faceAspect, common.face_margin)
                       }
                     >
                       {faceBusy ? "検出中…" : "顔に合わせる"}
@@ -288,17 +346,19 @@ export default function Page() {
           {image ? (
             <Panel title="トリミングのヒント">
               <p className="muted" style={{ margin: 0 }}>
-                枠の比率は右の「形状」設定に連動します。顔がはっきり大きく写るように
-                寄せると、線の陰影で表情が出やすくなります。
+                {litho
+                  ? "リソフェインは板の縦横比がトリミングでそのまま決まるので、比率は自由に切り抜けます。明暗の差がはっきりした写真ほどきれいに出ます。"
+                  : "枠の比率は右の「形状」設定に連動します。顔がはっきり大きく写るように寄せると、線の陰影で表情が出やすくなります。"}
               </p>
             </Panel>
           ) : null}
         </div>
 
-        {/* ---------------------------------------------- 2. プレビュー */}
+        {/* ---------------------------------------------- 3. プレビュー */}
         <div className="col">
-          <Panel step={2} title="プレビュー">
+          <Panel step={3} title="プレビュー">
             <PreviewStage
+              mode={mode}
               preview={preview}
               busy={previewBusy}
               error={previewError}
@@ -306,8 +366,8 @@ export default function Page() {
             />
           </Panel>
 
-          {/* ------------------------------------------------ 3. 出力 */}
-          <Panel step={3} title="STLを出力">
+          {/* ------------------------------------------------ 4. 出力 */}
+          <Panel step={4} title="STLを出力">
             <div className="field">
               <div className="field-head">
                 <label htmlFor="fname">ファイル名</label>
@@ -331,9 +391,13 @@ export default function Page() {
                 value={quality}
                 onChange={(e) => setQuality(e.target.value as Quality)}
               >
-                <option value="draft">ドラフト（速い・粗い）</option>
+                <option value="draft">
+                  {litho ? "ドラフト（分割数 半分・速い）" : "ドラフト（速い・粗い）"}
+                </option>
                 <option value="normal">標準</option>
-                <option value="fine">高精細（遅い・大きいファイル）</option>
+                <option value="fine">
+                  {litho ? "高精細（分割数 1.5倍・重い）" : "高精細（遅い・大きいファイル）"}
+                </option>
               </select>
             </div>
 
@@ -357,6 +421,7 @@ export default function Page() {
               {canPickSaveLocation
                 ? "保存先を選ぶダイアログが開きます。"
                 : "ブラウザのダウンロードフォルダに保存されます。"}
+              {litho ? " リソフェインは分割数によってファイルが数十MBになります。" : null}
             </p>
 
             {stlError ? <Message kind="error">{stlError}</Message> : null}
@@ -364,22 +429,39 @@ export default function Page() {
           </Panel>
         </div>
 
-        {/* ---------------------------------------- 4. パラメータ */}
+        {/* ---------------------------------------- 5. パラメータ */}
         <div className="col col-params">
-          <Panel title="パラメータ" flush>
-            <ParamPanel
-              params={params}
-              onChange={patch}
-              onReset={() => setParams(DEFAULT_PARAMS)}
-              faceAvailable={faceAvailable}
-              faceBusy={faceBusy}
-              faceMessage={faceMessage}
-              onDetectFace={() => {
-                if (image) {
-                  void runFaceDetect(image.image_id, 1 / aspect, params.face_margin);
-                }
-              }}
-            />
+          <Panel title={`パラメータ（${MODE_LABELS[mode]}）`} flush>
+            {litho ? (
+              <LithophaneParamPanel
+                params={lithoParams}
+                onChange={patchLitho}
+                onReset={() => setLithoParams(DEFAULT_LITHOPHANE)}
+                size={preview?.size ?? null}
+                faceAvailable={faceAvailable}
+                faceBusy={faceBusy}
+                faceMessage={faceMessage}
+                onDetectFace={() => {
+                  if (image) {
+                    void runFaceDetect(image.image_id, faceAspect, lithoParams.face_margin);
+                  }
+                }}
+              />
+            ) : (
+              <ParamPanel
+                params={shadowParams}
+                onChange={patchShadow}
+                onReset={() => setShadowParams(DEFAULT_SHADOW_ART)}
+                faceAvailable={faceAvailable}
+                faceBusy={faceBusy}
+                faceMessage={faceMessage}
+                onDetectFace={() => {
+                  if (image) {
+                    void runFaceDetect(image.image_id, faceAspect, shadowParams.face_margin);
+                  }
+                }}
+              />
+            )}
           </Panel>
         </div>
       </main>
@@ -387,8 +469,24 @@ export default function Page() {
   );
 }
 
+const MODE_SUFFIX: Record<Mode, string> = {
+  shadow_art: "-shadow-art",
+  lithophane: "-lithophane",
+};
+
 /** アップロードしたファイル名からSTLのファイル名候補を作る */
-function suggestName(original: string): string {
+function suggestName(original: string, mode: Mode): string {
   const base = original.replace(/\.[^.]+$/, "").trim();
-  return base ? `${base}-shadow-art` : "shadow-art";
+  return base ? `${base}${MODE_SUFFIX[mode]}` : MODE_SUFFIX[mode].slice(1);
+}
+
+/** モードを切り替えたらファイル名の接尾辞も付け替える */
+function swapModeSuffix(current: string, from: Mode, to: Mode): string {
+  const oldSuffix = MODE_SUFFIX[from];
+  const newSuffix = MODE_SUFFIX[to];
+  if (current.endsWith(oldSuffix)) {
+    return current.slice(0, -oldSuffix.length) + newSuffix;
+  }
+  if (current === oldSuffix.slice(1)) return newSuffix.slice(1);
+  return current;
 }

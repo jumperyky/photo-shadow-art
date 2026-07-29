@@ -67,7 +67,7 @@ def test_image_id_traversal_is_rejected():
 
 def test_preview_returns_png_data_url():
     image_id = upload()
-    res = client.post("/api/preview", json={"image_id": image_id, "diameter": 150})
+    res = client.post("/api/preview", json={"mode": "shadow_art", "image_id": image_id, "diameter": 150})
     assert res.status_code == 200, res.text
     body = res.json()
     assert body["image"].startswith("data:image/png;base64,")
@@ -79,7 +79,7 @@ def test_preview_returns_png_data_url():
 def test_preview_rectangle_uses_aspect():
     image_id = upload()
     res = client.post("/api/preview", json={
-        "image_id": image_id, "shape": "rectangle", "aspect": 2.0,
+        "mode": "shadow_art", "image_id": image_id, "shape": "rectangle", "aspect": 2.0,
         "diameter": 150, "frame_width": 10,
     })
     size = res.json()["size"]
@@ -93,7 +93,7 @@ def test_circle_ignores_aspect():
     """円は等方なので aspect を送っても縦長にならないこと"""
     image_id = upload()
     res = client.post("/api/preview", json={
-        "image_id": image_id, "shape": "circle", "aspect": 2.0, "diameter": 150,
+        "mode": "shadow_art", "image_id": image_id, "shape": "circle", "aspect": 2.0, "diameter": 150,
     })
     size = res.json()["size"]
     assert size["outer_width_mm"] == size["outer_height_mm"]
@@ -104,7 +104,7 @@ def test_large_size_within_limit_has_no_warnings():
     """1800mm以内なら警告もエラーも出さずに通ること(要件)"""
     image_id = upload()
     res = client.post("/api/preview", json={
-        "image_id": image_id, "shape": "square", "diameter": 1700,
+        "mode": "shadow_art", "image_id": image_id, "shape": "square", "diameter": 1700,
         "frame_width": 45, "lines": 90, "min_width": 6, "max_width": 16,
     })
     assert res.status_code == 200, res.text
@@ -117,7 +117,7 @@ def test_large_size_within_limit_has_no_warnings():
 def test_diameter_at_exact_limit_is_accepted():
     image_id = upload()
     res = client.post("/api/preview", json={
-        "image_id": image_id, "diameter": 1800, "frame_width": 0,
+        "mode": "shadow_art", "image_id": image_id, "diameter": 1800, "frame_width": 0,
         "lines": 60, "min_width": 8, "max_width": 20,
     })
     assert res.status_code == 200, res.text
@@ -126,7 +126,7 @@ def test_diameter_at_exact_limit_is_accepted():
 
 def test_diameter_over_limit_is_rejected_by_validation():
     image_id = upload()
-    res = client.post("/api/preview", json={"image_id": image_id, "diameter": 2500})
+    res = client.post("/api/preview", json={"mode": "shadow_art", "image_id": image_id, "diameter": 2500})
     assert res.status_code == 422
 
 
@@ -134,7 +134,7 @@ def test_outer_size_over_limit_warns_but_succeeds():
     """枠を含めて1800mmを超えた場合は、生成はできるが警告が付くこと"""
     image_id = upload()
     res = client.post("/api/preview", json={
-        "image_id": image_id, "diameter": 1750, "frame_width": 60,
+        "mode": "shadow_art", "image_id": image_id, "diameter": 1750, "frame_width": 60,
         "lines": 60, "min_width": 8, "max_width": 20,
     })
     assert res.status_code == 200
@@ -169,7 +169,7 @@ def test_auto_face_falls_back_without_error():
     )
     image_id = image_id_res.json()["image_id"]
     res = client.post("/api/preview", json={
-        "image_id": image_id, "auto_face": True, "diameter": 150,
+        "mode": "shadow_art", "image_id": image_id, "auto_face": True, "diameter": 150,
     })
     assert res.status_code == 200, res.text
     body = res.json()
@@ -181,7 +181,7 @@ def test_manual_crop_wins_over_auto_face():
     image_id = upload()
     crop = {"left": 0.1, "top": 0.1, "right": 0.6, "bottom": 0.6}
     res = client.post("/api/preview", json={
-        "image_id": image_id, "auto_face": True, "crop": crop, "diameter": 150,
+        "mode": "shadow_art", "image_id": image_id, "auto_face": True, "crop": crop, "diameter": 150,
     })
     assert res.json()["applied_crop"] == crop
 
@@ -190,7 +190,7 @@ def test_manual_crop_wins_over_auto_face():
 def test_invalid_crop_is_rejected():
     image_id = upload()
     res = client.post("/api/preview", json={
-        "image_id": image_id,
+        "mode": "shadow_art", "image_id": image_id,
         "crop": {"left": 0.6, "top": 0.1, "right": 0.2, "bottom": 0.5},
     })
     assert res.status_code == 422
@@ -199,7 +199,7 @@ def test_invalid_crop_is_rejected():
 def test_max_width_below_min_width_is_rejected():
     image_id = upload()
     res = client.post("/api/preview", json={
-        "image_id": image_id, "min_width": 3.0, "max_width": 1.0,
+        "mode": "shadow_art", "image_id": image_id, "min_width": 3.0, "max_width": 1.0,
     })
     assert res.status_code == 422
 
@@ -208,7 +208,7 @@ def test_max_width_below_min_width_is_rejected():
 def test_stl_download():
     image_id = upload()
     res = client.post("/api/stl", json={
-        "image_id": image_id, "shape": "rectangle", "aspect": 1.4,
+        "mode": "shadow_art", "image_id": image_id, "shape": "rectangle", "aspect": 1.4,
         "diameter": 150, "lines": 30, "quality": "draft",
         "filename": "テスト作品",
     })
@@ -229,11 +229,171 @@ def test_stl_download():
 def test_stl_filename_is_sanitized():
     image_id = upload()
     res = client.post("/api/stl", json={
-        "image_id": image_id, "diameter": 100, "lines": 20, "quality": "draft",
+        "mode": "shadow_art", "image_id": image_id, "diameter": 100, "lines": 20, "quality": "draft",
         "filename": "../../evil name/../x",
     })
     cd = res.headers["content-disposition"]
     assert "../" not in cd.split("filename*=")[0]
+
+
+# ---------------------------------------------------------------------------
+# リソフェイン
+# ---------------------------------------------------------------------------
+def test_config_lists_both_modes():
+    cfg = client.get("/api/config").json()
+    ids = [m["id"] for m in cfg["modes"]]
+    assert ids == ["shadow_art", "lithophane"]
+    for m in cfg["modes"]:
+        assert m["label"] and m["description"] and m["defaults"]
+
+
+def test_mode_is_required():
+    """
+    mode を省略したリクエストは 422 で弾かれること。
+    どちらの方式かを取り違えて別物を生成するより、明示させるほうが安全。
+    """
+    image_id = upload()
+    res = client.post("/api/preview", json={"image_id": image_id, "diameter": 150})
+    assert res.status_code == 422
+    assert "mode" in res.text
+
+
+def test_unknown_mode_is_rejected():
+    image_id = upload()
+    res = client.post("/api/preview", json={"mode": "hologram", "image_id": image_id})
+    assert res.status_code == 422
+
+
+def test_lithophane_preview():
+    image_id = upload()
+    res = client.post("/api/preview", json={
+        "mode": "lithophane", "image_id": image_id, "width": 100,
+    })
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["mode"] == "lithophane"
+    assert body["image"].startswith("data:image/png;base64,")
+    size = body["size"]
+    assert size["design_width_mm"] == 100.0
+    # 600x800 の画像なので高さは 133.33mm
+    assert abs(size["design_height_mm"] - 133.33) < 0.1
+    assert size["min_thickness_mm"] == 0.6
+    assert size["max_thickness_mm"] == 3.0
+    assert size["grid"] and size["face_count"] > 0
+    assert size["radius_mm"] is None      # 平板
+
+
+def test_lithophane_preview_reports_export_grid_not_preview_grid():
+    """
+    プレビューは分割数を抑えて高速に作るが、UIに出す格子と三角形数は
+    STL出力時の値であること(でないとファイルサイズの目安にならない)。
+    """
+    image_id = upload()
+    res = client.post("/api/preview", json={
+        "mode": "lithophane", "image_id": image_id, "width": 100,
+        "samples": 900, "preview_size": 400,
+    })
+    size = res.json()["size"]
+    assert size["grid"].startswith("900 x "), size["grid"]
+
+
+def test_lithophane_curved_reports_radius():
+    image_id = upload()
+    res = client.post("/api/preview", json={
+        "mode": "lithophane", "image_id": image_id, "width": 120, "curve": 60,
+    })
+    size = res.json()["size"]
+    import math
+    assert abs(size["radius_mm"] - 120 / math.radians(60)) < 0.05
+    # 湾曲させると幅は弦まで縮み、奥行きが出る
+    assert size["outer_width_mm"] < 120
+    assert size["outer_depth_mm"] > 3.0
+
+
+def test_lithophane_thickness_validation():
+    image_id = upload()
+    res = client.post("/api/preview", json={
+        "mode": "lithophane", "image_id": image_id,
+        "min_thickness": 3.0, "max_thickness": 1.0,
+    })
+    assert res.status_code == 422
+
+
+def test_lithophane_width_over_limit_is_rejected():
+    image_id = upload()
+    res = client.post("/api/preview", json={
+        "mode": "lithophane", "image_id": image_id, "width": 2500,
+    })
+    assert res.status_code == 422
+
+
+def test_lithophane_auto_face_falls_back():
+    res_up = client.post(
+        "/api/upload",
+        files={"file": ("s.png", (REPO / "samples" / "test_silhouette.png").read_bytes(),
+                        "image/png")},
+    )
+    image_id = res_up.json()["image_id"]
+    res = client.post("/api/preview", json={
+        "mode": "lithophane", "image_id": image_id, "auto_face": True,
+    })
+    assert res.status_code == 200, res.text
+    assert any("画像全体" in n for n in res.json()["notices"])
+
+
+def test_lithophane_stl_is_printable():
+    image_id = upload()
+    res = client.post("/api/stl", json={
+        "mode": "lithophane", "image_id": image_id, "width": 80,
+        "samples": 120, "quality": "draft", "curve": 45,
+        "filename": "リソ作品",
+    })
+    assert res.status_code == 200, res.text
+    assert res.headers["content-type"] == "model/stl"
+    assert res.headers["x-mode"] == "lithophane"
+    cd = res.headers["content-disposition"]
+    assert 'filename="lithophane.stl"' in cd and "filename*=UTF-8''" in cd
+
+    import trimesh
+
+    mesh = trimesh.load(io.BytesIO(res.content), file_type="stl")
+    assert mesh.is_watertight
+    assert mesh.is_winding_consistent
+    assert mesh.volume > 0
+
+
+def test_lithophane_quality_changes_resolution():
+    """品質設定で分割数が変わること"""
+    image_id = upload()
+    sizes = {}
+    for q in ("draft", "normal"):
+        res = client.post("/api/stl", json={
+            "mode": "lithophane", "image_id": image_id, "width": 80,
+            "samples": 160, "quality": q,
+        })
+        assert res.status_code == 200, res.text
+        sizes[q] = len(res.content)
+    assert sizes["normal"] > sizes["draft"] * 1.5, sizes
+
+
+def test_shadow_art_and_lithophane_share_the_same_crop():
+    """同じクロップを両方式に渡しても、それぞれ正しく反映されること"""
+    image_id = upload()
+    crop = {"left": 0.2, "top": 0.1, "right": 0.8, "bottom": 0.7}
+    for mode in ("shadow_art", "lithophane"):
+        res = client.post("/api/preview", json={
+            "mode": mode, "image_id": image_id, "crop": crop,
+        })
+        assert res.status_code == 200, res.text
+        assert res.json()["applied_crop"] == crop
+
+    # リソフェインはクロップの比率がそのまま板の比率になる
+    res = client.post("/api/preview", json={
+        "mode": "lithophane", "image_id": image_id, "crop": crop, "width": 120,
+    })
+    size = res.json()["size"]
+    # 元画像 600x800 → クロップ後 360 x 480 → 比率 4:3
+    assert abs(size["design_height_mm"] - 160.0) < 0.5, size
 
 
 if __name__ == "__main__":
