@@ -57,6 +57,26 @@ photo-shadow-art/
 
 ## 3. セットアップ
 
+### 3-0. かんたん手順(推奨)
+
+```bash
+./setup.sh      # .venv 作成 + Python/npm の依存インストール + 動作確認
+./dev.sh        # API(:8000) と UI(:3000) を起動
+```
+
+ブラウザで http://localhost:3000 を開く。停止は Ctrl+C。
+
+必要なもの: Python 3.10以上、Node.js 20以上。
+`dev.sh` は `./.venv` があれば自動で使うので、仮想環境を activate する必要はない。
+
+ポートが埋まっている場合:
+
+```bash
+PORT_UI=3100 PORT_API=8001 ./dev.sh
+```
+
+以下は手動で入れる場合の内訳。
+
 ### 3-1. Python(CLI・APIサーバー共通)
 
 ```bash
@@ -100,6 +120,16 @@ cd frontend && npm run dev
 フロントの `/api/*` は `next.config.mjs` の rewrites でAPIへプロキシしているため、
 CORSの設定を気にする必要はありません(APIのURLを変えたい場合は環境変数
 `API_BASE_URL` を指定)。
+
+この構成では Python API は `127.0.0.1` にしかバインドされません。
+ブラウザが直接触るのは Next.js(:3000)だけで、APIへの中継は同一マシン内で
+完結するため、APIがLANに露出することはありません。
+
+> **別のPCからも使いたい場合(未対応):**
+> 本番モード(`npm run build && npm start`)なら `http://<PCのIP>:3000` で
+> LAN内の別端末から使えることを確認済み。ただし `./dev.sh` が使う開発モードは
+> Next.js 16 のクロスオリジン保護(`allowedDevOrigins`)により別端末からは
+> 動かない。対応する場合は `next.config.mjs` に `allowedDevOrigins` の設定が必要。
 
 ### 3-4. テスト
 
