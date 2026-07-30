@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import List, Literal, Optional, Union
 
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -18,6 +19,12 @@ from photo_common import MAX_PRINT_SIZE_MM
 
 Mode = Literal["shadow_art", "lithophane"]
 ShapeName = Literal["square", "rectangle", "circle", "hexagon"]
+
+_HEX_COLOR = re.compile(r"^#[0-9a-fA-F]{6}$")
+
+# プレビューの既定のフィラメント色。line_art_stl.render_preview_image() の
+# fg 既定値と同じ濃いグレー。フロント側の DEFAULT_FILAMENT と揃えること。
+DEFAULT_FILAMENT_COLOR = "#141414"
 
 
 class CropBox(BaseModel):
@@ -122,6 +129,17 @@ class LithophaneParams(CommonParams):
 # ---------------------------------------------------------------------------
 class PreviewOptions(BaseModel):
     preview_size: int = Field(default=760, ge=200, le=1600)
+
+    # 見た目だけに効く。ジオメトリにもSTLにも影響しないので、
+    # ジオメトリ用のパラメータ(ShadowArtParams/LithophaneParams)とは分けてある。
+    filament_color: str = DEFAULT_FILAMENT_COLOR
+
+    @field_validator("filament_color")
+    @classmethod
+    def _check_hex(cls, v):
+        if not _HEX_COLOR.match(v):
+            raise ValueError("フィラメント色は #rrggbb 形式で指定してください。")
+        return v.lower()
 
 
 class ShadowArtPreviewRequest(ShadowArtParams, PreviewOptions):

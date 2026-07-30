@@ -23,6 +23,7 @@ import {
   writeToTarget,
 } from "@/lib/api";
 import {
+  DEFAULT_FILAMENT,
   DEFAULT_LITHOPHANE,
   DEFAULT_SHADOW_ART,
   MODE_LABELS,
@@ -80,6 +81,8 @@ export default function Page() {
   const [previewError, setPreviewError] = useState<string | null>(null);
 
   const [view, setView] = useState<ViewMode>("2d");
+  // 2Dプレビューと3Dビューアの両方に渡す表示色。ジオメトリには影響しない。
+  const [filament, setFilament] = useState(DEFAULT_FILAMENT);
   const [mesh, setMesh] = useState<MeshData | null>(null);
   const [meshBusy, setMeshBusy] = useState(false);
   const [meshError, setMeshError] = useState<string | null>(null);
@@ -222,7 +225,8 @@ export default function Page() {
       abortRef.current = ac;
       setPreviewBusy(true);
 
-      fetchPreview(mode, image.image_id, shadowParams, lithoParams, crop, 760, ac.signal)
+      fetchPreview(
+        mode, image.image_id, shadowParams, lithoParams, crop, 760, filament, ac.signal)
         .then((res) => {
           setPreview(res);
           setPreviewError(null);
@@ -237,7 +241,7 @@ export default function Page() {
     }, PREVIEW_DEBOUNCE_MS);
 
     return () => clearTimeout(timer);
-  }, [mode, image, shadowParams, lithoParams, crop]);
+  }, [mode, image, shadowParams, lithoParams, crop, filament]);
 
   useEffect(() => () => abortRef.current?.abort(), []);
 
@@ -422,6 +426,8 @@ export default function Page() {
               mode={mode}
               view={view}
               onViewChange={setView}
+              filament={filament}
+              onFilamentChange={setFilament}
               preview={preview}
               busy={previewBusy}
               error={previewError}

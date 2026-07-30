@@ -143,6 +143,8 @@ export function fetchPreview(
   litho: LithophaneParams,
   crop: CropBox | null,
   previewSize: number,
+  /** フィラメントの色 (#rrggbb)。描画にだけ効き、ジオメトリは変わらない。 */
+  filamentColor: string,
   signal?: AbortSignal,
 ): Promise<PreviewResponse> {
   return postJson(
@@ -150,6 +152,7 @@ export function fetchPreview(
     {
       ...requestBody(mode, imageId, shadow, litho, crop),
       preview_size: previewSize,
+      filament_color: filamentColor,
     },
     signal,
   );

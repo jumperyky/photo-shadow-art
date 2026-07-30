@@ -43,6 +43,42 @@ export const DEFAULT_LITHOPHANE: LithophaneParams = {
 /** プリンタの最大造形サイズ(mm)。ここまでは警告なしで指定できる。 */
 export const MAX_PRINT_SIZE_MM = 1800;
 
+/**
+ * プレビューに使うフィラメントの色。
+ *
+ * 見た目だけの設定で、ジオメトリにもSTLにも影響しない。2Dプレビュー
+ * (サーバーが描画)と3Dビューア(three.jsのマテリアル)の両方に同じ値が
+ * 渡るので、どちらのタブでも同じ色に見える。
+ *
+ * 既定値はバックエンドの schemas.DEFAULT_FILAMENT_COLOR と揃えること。
+ */
+export const DEFAULT_FILAMENT = "#141414";
+
+export const FILAMENT_COLORS: { value: string; label: string }[] = [
+  { value: "#141414", label: "ブラック" },
+  { value: "#f2f0ea", label: "ホワイト" },
+  { value: "#9aa1ab", label: "グレー" },
+  { value: "#d3bd93", label: "ベージュ" },
+  { value: "#c0392b", label: "レッド" },
+  { value: "#e1732b", label: "オレンジ" },
+  { value: "#e8b93b", label: "イエロー" },
+  { value: "#2e8b57", label: "グリーン" },
+  { value: "#2c6fb5", label: "ブルー" },
+  { value: "#8e5bb5", label: "パープル" },
+];
+
+/**
+ * 明るいフィラメントかどうか。背景を明暗どちらにするかの判定に使う。
+ *
+ * 閾値と式はバックエンドの `_luma()` / `BACKDROP_SWITCH_LUMA` と同じ。
+ * ずらすと2Dと3Dで背景が食い違い、片方だけ作品が背景に溶ける。
+ */
+export function isLightFilament(hex: string): boolean {
+  const v = hex.replace("#", "");
+  const [r, g, b] = [0, 2, 4].map((i) => parseInt(v.slice(i, i + 2), 16) / 255);
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b > 0.45;
+}
+
 export const MODE_LABELS: Record<Mode, string> = {
   shadow_art: "シャドウアート",
   lithophane: "リソフェイン",

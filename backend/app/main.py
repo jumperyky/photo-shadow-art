@@ -97,6 +97,19 @@ LITHO_QUALITY_SCALE = {"draft": 0.5, "normal": 1.0, "fine": 1.5}
 MESH_SHADOW_SAMPLES = {"low": 90, "medium": 140}
 MESH_LITHO_SAMPLES = {"low": 80, "medium": 120}
 
+# --- プレビューの配色 -------------------------------------------------------
+# シャドウアートの2Dプレビューの背景。線と同化しないよう、フィラメントが
+# 暗ければ淡いタン、明るければ暗い紙に切り替える。背景は「線の隙間から
+# 透けて見えるもの」であって造形物の一部ではないので、色は自由に選べる。
+PREVIEW_BACKDROP_LIGHT = (222, 201, 158)
+PREVIEW_BACKDROP_DARK = (38, 42, 50)
+BACKDROP_SWITCH_LUMA = 0.45
+
+# リソフェインの透過光(電球色)。フィラメントの色相にこれを掛けて色味を作る。
+LITHO_LIGHT = (255, 244, 224)
+# これより暗いフィラメントは光をほとんど通さないので注意を出す
+LITHO_DARK_LUMA = 0.18
+
 SHADOW_ART_DEFAULTS = {
     "shape": "square", "aspect": 1.0, "diameter": 150.0, "lines": 48,
     "angle": 20.0, "min_width": 0.5, "max_width": 2.9,
@@ -446,22 +459,63 @@ def detect_face(req: FaceDetectRequest):
     )
 
 
+def _hex_to_rgb(value: str) -> tuple:
+    v = value.lstrip("#")
+    return (int(v[0:2], 16), int(v[2:4], 16), int(v[4:6], 16))
+
+
+def _luma(rgb) -> float:
+    """相対輝度 (0..1)。色の明暗の判定にだけ使う。"""
+    r, g, b = (c / 255.0 for c in rgb)
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b
+
+
+def _preview_backdrop(fg) -> tuple:
+    return (PREVIEW_BACKDROP_DARK if _luma(fg) > BACKDROP_SWITCH_LUMA
+            else PREVIEW_BACKDROP_LIGHT)
+
+
+def _litho_tint(fg) -> tuple:
+    """
+    リソフェインの透過光の色。
+
+    フィラメントの色相だけを取り出し(最大チャンネルを255まで伸ばす)、
+    照明色を掛ける。明るさは厚みのシミュレーション側が決めているので、
+    暗い色をそのまま掛けると画像全体が黒く潰れて何も見えなくなる。
+    暗いフィラメントについては別途 notice で注意する。
+    """
+    peak = max(fg)
+    # 純黒は色相を持たないので白として扱う
+    hue = (255, 255, 255) if peak == 0 else tuple(round(c * 255 / peak) for c in fg)
+    return tuple(round(h * light / 255) for h, light in zip(hue, LITHO_LIGHT))
+
+
 @app.post("/api/preview", response_model=PreviewResponse)
 def preview(req: AnyPreviewRequest = Body(..., discriminator="mode")):
     started = time.perf_counter()
     path = _resolve_image(req.image_id)
+    filament = _hex_to_rgb(req.filament_color)
 
     if isinstance(req, ShadowArtPreviewRequest):
         art, crop_box, notices = _build_shadow_art(
             req, path, SHADOW_SAMPLES["preview"])
-        image = la.render_preview_image(art, size=req.preview_size)
+        image = la.render_preview_image(
+            art, size=req.preview_size,
+            bg=_preview_backdrop(filament), fg=filament)
         warnings = art.warnings
         size = _shadow_art_size(art, req)
     else:
         # プレビューは分割数を抑えて高速に(見た目の階調は分割数に依存しない)
         samples = min(req.samples, req.preview_size)
         litho, crop_box, notices = _build_lithophane(req, path, samples)
-        image = lp.render_preview_image(litho, size=req.preview_size)
+        image = lp.render_preview_image(
+            litho, size=req.preview_size, tint=_litho_tint(filament))
+        if _luma(filament) < LITHO_DARK_LUMA:
+            notices.append(
+                "暗い色のフィラメントは光をほとんど通しません。"
+                "プレビューは色味だけを反映しているので、実物はこれよりずっと"
+                "暗くなります。リソフェインは白や淡い色での出力をおすすめします。"
+            )
         # 警告は実際の分割数(=ユーザー指定)で出したいので作り直す
         warnings = [w for w in litho.warnings if "分割数" not in w]
         warnings += _litho_face_count_warning(req, litho)

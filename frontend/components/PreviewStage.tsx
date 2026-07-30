@@ -1,6 +1,7 @@
 "use client";
 
 import { Message } from "./Controls";
+import { FilamentPicker } from "./FilamentPicker";
 import { MeshViewer } from "./MeshViewer";
 import { MAX_PRINT_SIZE_MM } from "@/lib/defaults";
 import type { MeshData } from "@/lib/mesh";
@@ -10,6 +11,8 @@ export function PreviewStage({
   mode,
   view,
   onViewChange,
+  filament,
+  onFilamentChange,
   preview,
   busy,
   error,
@@ -21,6 +24,8 @@ export function PreviewStage({
   mode: Mode;
   view: ViewMode;
   onViewChange: (v: ViewMode) => void;
+  filament: string;
+  onFilamentChange: (color: string) => void;
   preview: PreviewResponse | null;
   busy: boolean;
   error: string | null;
@@ -36,27 +41,36 @@ export function PreviewStage({
 
   return (
     <>
-      <div className="view-tabs" role="tablist" aria-label="プレビューの表示方法">
-        <button
-          type="button"
-          role="tab"
-          aria-selected={!is3d}
-          onClick={() => onViewChange("2d")}
-        >
-          {litho ? "2D（光の見え方）" : "2D（形状）"}
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={is3d}
-          onClick={() => onViewChange("3d")}
-        >
-          3D
-        </button>
+      <div className="preview-toolbar">
+        <div className="view-tabs" role="tablist" aria-label="プレビューの表示方法">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={!is3d}
+            onClick={() => onViewChange("2d")}
+          >
+            {litho ? "2D（光の見え方）" : "2D（形状）"}
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={is3d}
+            onClick={() => onViewChange("3d")}
+          >
+            3D
+          </button>
+        </div>
+        <FilamentPicker value={filament} onChange={onFilamentChange} />
       </div>
 
       {is3d ? (
-        <MeshViewer mesh={mesh} mode={mode} busy={meshBusy} error={meshError} />
+        <MeshViewer
+          mesh={mesh}
+          mode={mode}
+          color={filament}
+          busy={meshBusy}
+          error={meshError}
+        />
       ) : (
         <div className={`preview-stage${litho ? " backlit" : ""}`}>
           {preview ? (

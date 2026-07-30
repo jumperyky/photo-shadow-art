@@ -546,6 +546,106 @@ def test_mesh_requires_mode():
     assert client.post("/api/mesh", json={"image_id": image_id}).status_code == 422
 
 
+# --------------------------------------------------------------- 表示色
+def _preview_pixels(image_id, **extra):
+    """プレビューPNGをデコードして (画像, 色ヒストグラム) を返す"""
+    from PIL import Image as PILImage
+
+    body = {"mode": "shadow_art", "image_id": image_id, "diameter": 150}
+    body.update(extra)
+    res = client.post("/api/preview", json=body)
+    assert res.status_code == 200, res.text
+    raw = base64.b64decode(res.json()["image"].split(",", 1)[1])
+    img = PILImage.open(io.BytesIO(raw)).convert("RGB")
+    # (件数, 色) の降順。先頭2色が背景色と線の色になる。
+    return img, sorted(img.getcolors(maxcolors=1 << 24), reverse=True)
+
+
+def test_preview_uses_requested_filament_color():
+    """指定した色が実際に線の色として出ていること"""
+    image_id = upload()
+    _, colors = _preview_pixels(image_id, filament_color="#c0392b")
+    top = {c for _, c in colors[:2]}
+    assert (0xC0, 0x39, 0x2B) in top, colors[:4]
+
+
+def test_preview_default_filament_is_near_black():
+    image_id = upload()
+    _, colors = _preview_pixels(image_id)
+    top = {c for _, c in colors[:2]}
+    assert (20, 20, 20) in top, colors[:4]
+
+
+def test_preview_backdrop_flips_for_light_filament():
+    """明るいフィラメントでは背景が暗い側に切り替わり、線が埋もれないこと"""
+    from app.main import PREVIEW_BACKDROP_DARK, PREVIEW_BACKDROP_LIGHT
+
+    image_id = upload()
+    _, dark_fil = _preview_pixels(image_id, filament_color="#141414")
+    _, light_fil = _preview_pixels(image_id, filament_color="#f2f0ea")
+
+    assert PREVIEW_BACKDROP_LIGHT in {c for _, c in dark_fil[:2]}
+    assert PREVIEW_BACKDROP_DARK in {c for _, c in light_fil[:2]}
+
+
+def test_preview_rejects_bad_filament_color():
+    image_id = upload()
+    for bad in ["red", "#fff", "141414", "#12345g", "#1234567"]:
+        res = client.post("/api/preview", json={
+            "mode": "shadow_art", "image_id": image_id, "filament_color": bad,
+        })
+        assert res.status_code == 422, f"{bad} -> {res.status_code}"
+
+
+def test_filament_color_does_not_change_geometry():
+    """色は見た目だけの設定で、造形サイズや線の本数に影響しないこと"""
+    image_id = upload()
+    base = {"mode": "shadow_art", "image_id": image_id, "diameter": 150}
+    a = client.post("/api/preview", json={**base, "filament_color": "#141414"}).json()
+    b = client.post("/api/preview", json={**base, "filament_color": "#2c6fb5"}).json()
+    assert a["size"] == b["size"]
+    assert a["image"] != b["image"]
+
+
+def test_lithophane_tint_follows_filament_hue():
+    """リソフェインは色相だけを反映し、暗い色でも真っ黒にはならないこと"""
+    from PIL import Image as PILImage
+
+    image_id = upload()
+    res = client.post("/api/preview", json={
+        "mode": "lithophane", "image_id": image_id,
+        "width": 80, "samples": 80, "filament_color": "#2c6fb5",
+    })
+    assert res.status_code == 200, res.text
+    raw = base64.b64decode(res.json()["image"].split(",", 1)[1])
+    img = PILImage.open(io.BytesIO(raw)).convert("RGB")
+    # サンプル画像は暗部が多いので平均では判定できない。最も明るい部分
+    # (=光がよく透ける薄い箇所)の色で見る。
+    r, g, b = (ch[1] for ch in img.getextrema())
+    assert b > g > r, (r, g, b)   # 青みが出ている
+    assert b > 150, (r, g, b)     # 明るさは残っていて潰れていない
+
+
+def test_lithophane_warns_about_dark_filament():
+    image_id = upload()
+    body = {"mode": "lithophane", "image_id": image_id, "width": 80, "samples": 80}
+    dark = client.post("/api/preview", json={**body, "filament_color": "#141414"}).json()
+    light = client.post("/api/preview", json={**body, "filament_color": "#f2f0ea"}).json()
+    assert any("光をほとんど通しません" in n for n in dark["notices"])
+    assert not any("光をほとんど通しません" in n for n in light["notices"])
+
+
+def test_mesh_ignores_filament_color():
+    """3Dの色はブラウザ側で塗るので、メッシュには色を送らない"""
+    image_id = upload()
+    res = client.post("/api/mesh", json={
+        "mode": "shadow_art", "image_id": image_id, "filament_color": "#c0392b",
+    })
+    assert res.status_code == 200, res.text
+    plain = client.post("/api/mesh", json={"mode": "shadow_art", "image_id": image_id})
+    assert res.content == plain.content
+
+
 if __name__ == "__main__":
     failures = 0
     for name, fn in sorted(globals().items()):

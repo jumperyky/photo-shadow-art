@@ -769,11 +769,20 @@ select.select:focus-visible {
 }
 
 /* --------------------------------------------------------- 3D ビューア */
+/* タブとフィラメント色を1行に並べる。狭いときは折り返す。 */
+.preview-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
 .view-tabs {
   display: inline-flex;
   gap: 3px;
   padding: 3px;
-  margin-bottom: 12px;
   background: var(--bg);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
@@ -804,6 +813,47 @@ select.select:focus-visible {
   outline-offset: 2px;
 }
 
+/* --------------------------------------------------- フィラメントの色選択 */
+.filament-picker {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex-wrap: wrap;
+}
+
+.filament-label {
+  font-size: 12px;
+  color: var(--text-dim);
+  margin-right: 2px;
+}
+
+.filament-swatch {
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border-radius: 50%;
+  /* 白いフィラメントが背景に溶けないよう、常に縁取りを付ける */
+  border: 1px solid rgba(128, 128, 128, 0.55);
+  cursor: pointer;
+  transition: transform 0.12s, box-shadow 0.12s;
+}
+
+.filament-swatch:hover {
+  transform: scale(1.15);
+}
+
+.filament-swatch[aria-checked="true"] {
+  /* 内側の隙間で下地を覗かせてから外周のリングを描く(色に依存しない選択表示) */
+  box-shadow:
+    0 0 0 2px var(--bg-elev-1),
+    0 0 0 4px var(--accent);
+}
+
+.filament-swatch:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
 .viewer-stage {
   position: relative;
   min-height: 340px;
@@ -812,18 +862,19 @@ select.select:focus-visible {
   border-radius: var(--radius-sm);
   border: 1px solid var(--border);
   overflow: hidden;
-  /* 3Dモデルの背景。スタジオの背景紙のような上下グラデーション */
-  background: radial-gradient(
-    120% 90% at 50% 8%,
-    color-mix(in srgb, var(--bg-elev-2) 88%, #ffffff) 0%,
-    var(--bg) 78%
-  );
 }
 
-@media (prefers-color-scheme: dark) {
-  .viewer-stage {
-    background: radial-gradient(120% 90% at 50% 8%, #262f3d 0%, #0c0f14 78%);
-  }
+/*
+ * 3Dモデルの背景。スタジオの背景紙のような上下グラデーション。
+ * ページのテーマではなくフィラメントの色で明暗を決める(2Dプレビューの
+ * 背景と同じ考え方)。黒い作品を暗い背景に置くと形が読めなくなるため。
+ */
+.viewer-stage.on-light {
+  background: radial-gradient(120% 90% at 50% 8%, #f6f1e7 0%, #d9d2c4 78%);
+}
+
+.viewer-stage.on-dark {
+  background: radial-gradient(120% 90% at 50% 8%, #2b333f 0%, #0e1116 78%);
 }
 
 .viewer-canvas {
@@ -844,11 +895,20 @@ select.select:focus-visible {
   cursor: grabbing;
 }
 
+/*
+ * 背景の明暗はフィラメントの色で入れ替わるので、上に乗る文字は
+ * どちらでも読めるよう不透明の下地を敷く(ヒントと同じ扱い)。
+ */
 .viewer-overlay {
   position: absolute;
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
+  padding: 8px 14px;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--bg) 88%, transparent);
+  border: 1px solid var(--border);
+  backdrop-filter: blur(4px);
   pointer-events: none;
   margin: 0;
 }

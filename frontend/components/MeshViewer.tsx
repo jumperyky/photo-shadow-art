@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
+import { isLightFilament } from "@/lib/defaults";
 import type { MeshData } from "@/lib/mesh";
 import type { Mode } from "@/lib/types";
 
@@ -19,16 +20,28 @@ import type { Mode } from "@/lib/types";
 export function MeshViewer({
   mesh,
   mode,
+  color,
   busy,
   error,
 }: {
   mesh: MeshData | null;
   mode: Mode;
+  /** フィラメントの色 (#rrggbb)。2Dプレビューと同じ値が渡る。 */
+  color: string;
   busy: boolean;
   error: string | null;
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const [unsupported, setUnsupported] = useState(false);
+
+  // 色替えでメッシュを作り直さないよう、生成時の初期値としてだけ参照する。
+  // 実際の追従は下の専用エフェクトが行う。
+  const colorRef = useRef(color);
+  colorRef.current = color;
+
+  // 白いフィラメントを明るい背景に置くと輪郭が溶けるので、2Dプレビューと
+  // 同じ判定で背景の明暗を入れ替える。ページのテーマではなく色で決める。
+  const stageTone = isLightFilament(color) ? "on-dark" : "on-light";
 
   // three のオブジェクトは再レンダーをまたいで保持する
   const coreRef = useRef<{
@@ -163,7 +176,7 @@ export function MeshViewer({
     // flatShading にしているので法線は不要(シェーダ側で面法線を出す)。
     // 頂点法線を計算すると、押し出しの角が丸まって実物と印象が変わる。
     const material = new THREE.MeshStandardMaterial({
-      color: 0xe9e2d2,
+      color: new THREE.Color(colorRef.current),
       roughness: 0.72,
       metalness: 0.02,
       flatShading: true,
@@ -213,9 +226,22 @@ export function MeshViewer({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mesh, mode]);
 
+  // -------------------------------------------------------------- 色の追従
+  // 色だけを差し替える。メッシュごと作り直すとカメラの向きが初期化されて、
+  // 回して見ている最中に色を変えると視点が飛んでしまう。
+  useEffect(() => {
+    const core = coreRef.current;
+    if (!core) return;
+    for (const child of core.group.children) {
+      if (child instanceof THREE.Mesh) {
+        (child.material as THREE.MeshStandardMaterial).color.set(color);
+      }
+    }
+  }, [color, mesh]);
+
   if (unsupported) {
     return (
-      <div className="viewer-stage">
+      <div className={`viewer-stage ${stageTone}`}>
         <p className="preview-empty">
           このブラウザでは3D表示（WebGL）を利用できません。2Dプレビューをお使いください。
         </p>
@@ -224,7 +250,7 @@ export function MeshViewer({
   }
 
   return (
-    <div className="viewer-stage">
+    <div className={`viewer-stage ${stageTone}`}>
       <div ref={hostRef} className="viewer-canvas" />
       {!mesh && !error ? (
         <p className="preview-empty viewer-overlay">
