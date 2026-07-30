@@ -268,8 +268,11 @@ def check_print_size(width_mm, height_mm, depth_mm=0.0, max_size=MAX_PRINT_SIZE_
     """造形サイズが上限を超えている場合だけ警告する(上限内なら完全に無警告)。"""
     warnings = []
     if width_mm > max_size or height_mm > max_size or depth_mm > max_size:
+        dims = f"{width_mm:.0f} x {height_mm:.0f}"
+        if depth_mm > 0:
+            dims += f" x {depth_mm:.0f}"
         warnings.append(
-            f"警告: 外形サイズ {width_mm:.0f} x {height_mm:.0f} mm が"
+            f"警告: 外形サイズ {dims} mm が"
             f"プリンタの最大造形サイズ {max_size:.0f}mm を超えています。"
         )
     return warnings

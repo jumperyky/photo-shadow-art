@@ -425,15 +425,12 @@ def preview(req: AnyPreviewRequest = Body(..., discriminator="mode")):
 
 def _projected_grid(req: LithophanePreviewRequest, litho) -> str:
     """プレビューは粗く作るので、STL出力時の格子サイズを計算して見せる"""
-    nx = req.samples
-    nz = max(8, round(nx * litho.samples_z / litho.samples_x))
+    nx, nz = litho.grid_for_samples(req.samples)
     return f"{nx} x {nz}"
 
 
 def _projected_face_count(req: LithophanePreviewRequest, litho) -> int:
-    nx = req.samples
-    nz = max(8, round(nx * litho.samples_z / litho.samples_x))
-    return 4 * (nx - 1) * (nz - 1) + 4 * ((nx - 1) + (nz - 1))
+    return lp.face_count_for(*litho.grid_for_samples(req.samples))
 
 
 def _litho_face_count_warning(req, litho):

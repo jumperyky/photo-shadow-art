@@ -297,6 +297,28 @@ def test_lithophane_preview_reports_export_grid_not_preview_grid():
     assert size["grid"].startswith("900 x "), size["grid"]
 
 
+def test_lithophane_projected_grid_matches_actual_export():
+    """
+    UIに見せる格子・三角形数が、実際にSTLを出力したときと一致すること。
+    修正前は極端な縦長クロップで nz のクランプ(4800)が見積もりに入っておらず、
+    「1200 x 7579」のように実際(1200 x 4800)より大きく表示されていた。
+    """
+    image_id = upload()
+    sliver = {"left": 0.5, "top": 0.0, "right": 0.501, "bottom": 1.0}
+    prev = client.post("/api/preview", json={
+        "mode": "lithophane", "image_id": image_id, "crop": sliver,
+        "samples": 1200,
+    }).json()
+
+    import lithophane_stl as lp
+    from app import storage
+    path = storage.get_path(image_id)
+    litho = lp.build_lithophane(str(path), samples=1200,
+                                crop_box=(0.5, 0.0, 0.501, 1.0))
+    assert prev["size"]["grid"] == f"{litho.samples_x} x {litho.samples_z}"
+    assert prev["size"]["face_count"] == litho.face_count
+
+
 def test_lithophane_curved_reports_radius():
     image_id = upload()
     res = client.post("/api/preview", json={

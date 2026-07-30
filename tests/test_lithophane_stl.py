@@ -108,6 +108,25 @@ def test_curved_radius_matches_arc_length():
         assert math.isclose(lit.radius_mm * math.radians(deg), 120.0, rel_tol=1e-9)
 
 
+def test_footprint_matches_actual_mesh_bounds():
+    """
+    footprint() の値が実メッシュのバウンディングボックスと一致すること。
+    修正前は 180度超の湾曲で、外周端の沈み込みを内面半径で計算していたため
+    奥行きが最大3mm過小だった(350度で 42.2mm と報告、実際は 45.2mm)。
+    """
+    for deg in (0.0, 60.0, 180.0, 270.0, 350.0):
+        lit = lp.build_lithophane(SAMPLE, width_mm=120, samples=60, curve_deg=deg)
+        mesh = lp.build_mesh(lit)
+        span = mesh.bounds[1] - mesh.bounds[0]
+        fw, fh, fd = lit.footprint()
+        # 格子の離散化誤差ぶんだけ緩める(footprint >= 実測 になるのが正)
+        assert fw >= span[0] - 1e-6 and fw - span[0] < 0.2, \
+            f"deg={deg}: 幅 footprint={fw:.2f} 実測={span[0]:.2f}"
+        assert fd >= span[1] - 1e-6 and fd - span[1] < 0.2, \
+            f"deg={deg}: 奥行き footprint={fd:.2f} 実測={span[1]:.2f}"
+        assert math.isclose(fh, span[2], rel_tol=1e-6)
+
+
 def test_curved_is_narrower_than_flat():
     """湾曲させると占有する幅は弦の長さまで縮み、そのぶん奥行きが出ること"""
     flat = lp.build_lithophane(ramp_image(), width_mm=120, samples=48, curve_deg=0)

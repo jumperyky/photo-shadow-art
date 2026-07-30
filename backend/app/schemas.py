@@ -117,9 +117,6 @@ class LithophaneParams(CommonParams):
         return self
 
 
-AnyParams = Union[ShadowArtParams, LithophaneParams]
-
-
 # ---------------------------------------------------------------------------
 # リクエスト
 # ---------------------------------------------------------------------------

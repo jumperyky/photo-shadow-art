@@ -312,6 +312,13 @@ def build_artwork(image, shape="hexagon", diameter=120.0, aspect=1.0,
     R = float(diameter) / 2.0
     aspect = float(aspect)
 
+    # 円・六角形・n角形は等方なので aspect は常に 1 として扱う。
+    # ここで正規化しないと、画像だけ aspect 比でクロップされて枠は等方のまま、
+    # という食い違いが起きて像が縦横に歪む(CLIから直接呼んだ場合に実害があった。
+    # APIは effective_aspect で同じ正規化をしているため影響しない)。
+    if shape not in ("square", "rectangle"):
+        aspect = 1.0
+
     if auto_face and crop_box is None:
         crop_box = detect_face_crop_box(image, margin=face_margin, aspect=aspect)
 

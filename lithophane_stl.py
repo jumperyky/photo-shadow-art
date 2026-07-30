@@ -47,6 +47,27 @@ PREVIEW_ATTENUATION = 1.6
 # 面数がこれを超えると警告する(STLが数百MBになるのを防ぐ)
 FACE_COUNT_WARN = 2_000_000
 
+# 分割数の上限(横方向)。縦方向は縦長画像のためにこの4倍まで許す。
+DEFAULT_MAX_SAMPLES = 1200
+
+
+def grid_shape(src_w, src_h, samples, max_samples=DEFAULT_MAX_SAMPLES):
+    """
+    画像サイズと指定分割数から実際の格子 (nx, nz) を決める。
+    build_lithophane と、UI向けの見積もり(backend)の両方がこれを使う。
+    見積もりロジックを複製すると、極端な縦長クロップ等でクランプの有無が
+    食い違い、表示される三角形数が実際と合わなくなる。
+    """
+    nx = int(np.clip(int(samples), 8, int(max_samples)))
+    nz = int(round(nx * src_h / max(1, src_w)))
+    nz = int(np.clip(nz, 8, int(max_samples) * 4))
+    return nx, nz
+
+
+def face_count_for(nx, nz):
+    """build_mesh() が生成する三角形の数(格子サイズから決まる)"""
+    return 4 * (nx - 1) * (nz - 1) + 4 * ((nx - 1) + (nz - 1))
+
 
 # ---------------------------------------------------------------------------
 # 厚みマップの生成
@@ -60,6 +81,7 @@ class Lithophane:
     min_thickness: float
     max_thickness: float
     curve_deg: float            # 0 なら平板
+    src_size: tuple = (1, 1)    # サンプリング元画像の (幅, 高さ) px
     warnings: list = field(default_factory=list)
 
     @property
@@ -69,6 +91,14 @@ class Lithophane:
     @property
     def samples_z(self) -> int:
         return self.thickness.shape[0]
+
+    def grid_for_samples(self, samples, max_samples=DEFAULT_MAX_SAMPLES):
+        """
+        この画像を分割数 samples で出力したときの格子 (nx, nz)。
+        プレビューは粗い格子で作るため、UIにはこちらの値を見せる。
+        """
+        w, h = self.src_size
+        return grid_shape(w, h, samples, max_samples)
 
     @property
     def radius_mm(self) -> float:
@@ -80,8 +110,7 @@ class Lithophane:
     @property
     def face_count(self) -> int:
         """build_mesh() が生成する三角形の数"""
-        nx, nz = self.samples_x, self.samples_z
-        return 4 * (nx - 1) * (nz - 1) + 4 * ((nx - 1) + (nz - 1))
+        return face_count_for(self.samples_x, self.samples_z)
 
     def footprint(self):
         """
@@ -93,12 +122,16 @@ class Lithophane:
         R = self.radius_mm
         half = math.radians(self.curve_deg) / 2.0
         outer = R + self.max_thickness
-        # 弦の幅。中心角が180度を超えると外周の直径が効いてくる
-        if self.curve_deg >= 180.0:
-            width = 2.0 * outer
-        else:
-            width = 2.0 * outer * math.sin(min(half, math.pi / 2))
-        depth = outer - R * math.cos(half) if self.curve_deg < 360 else 2 * outer
+
+        # 幅: X = r*sin(φ) の最大値の2倍。中心角が180度以上なら外周の直径。
+        width = 2.0 * outer * math.sin(min(half, math.pi / 2))
+
+        # 奥行き: Y = r*cos(φ) - R の範囲。最大は中央の外面(=max_thickness)。
+        # 最小は端で、cos(half) が正なら内面(半径R)、負なら外面(半径outer)が
+        # より深く沈む。180度超で外面側を取らないと数mm過小評価になる。
+        cos_half = math.cos(half)
+        min_y = (R if cos_half >= 0 else outer) * cos_half - R
+        depth = self.max_thickness - min_y
         return width, self.height_mm, max(depth, self.max_thickness)
 
 
@@ -156,10 +189,7 @@ def build_lithophane(image, width_mm=100.0, min_thickness=0.6,
                          equalize=equalize, aspect=None)
 
     src_h, src_w = arr.shape
-    nx = int(np.clip(int(samples), 8, int(max_samples)))
-    # 縦横比を保ったまま高さ方向の分割数を決める
-    nz = int(round(nx * src_h / src_w))
-    nz = int(np.clip(nz, 8, int(max_samples) * 4))
+    nx, nz = grid_shape(src_w, src_h, samples, max_samples)
 
     # 格子点の位置で画像をサンプリングする(端を含む)
     xs = np.linspace(0, src_w - 1, nx)
@@ -181,6 +211,7 @@ def build_lithophane(image, width_mm=100.0, min_thickness=0.6,
         min_thickness=float(min_thickness),
         max_thickness=float(max_thickness),
         curve_deg=float(curve_deg),
+        src_size=(src_w, src_h),
         warnings=warnings,
     )
 

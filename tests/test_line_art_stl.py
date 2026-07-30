@@ -140,6 +140,21 @@ def test_zero_frame_width_is_allowed():
     assert math.isclose(art.outer_width, 150.0, rel_tol=1e-3)
 
 
+def test_isotropic_shapes_ignore_aspect():
+    """
+    円・六角形・n角形では aspect 指定が無視されること。
+    修正前はCLI経由で --shape circle --aspect 2 のように渡すと、
+    画像だけ 2:1 でクロップされて枠は等方のままなので像が歪んでいた。
+    """
+    for shape in ("circle", "hexagon", 8):
+        a1 = la.build_artwork(SAMPLE, shape=shape, diameter=150, aspect=1.0,
+                              num_lines=24, samples_per_line=64)
+        a2 = la.build_artwork(SAMPLE, shape=shape, diameter=150, aspect=2.0,
+                              num_lines=24, samples_per_line=64)
+        assert math.isclose(a1.lines_area.area, a2.lines_area.area,
+                            rel_tol=1e-9), f"{shape}: aspect指定で結果が変わった"
+
+
 def test_grayscale_crop_matches_aspect():
     """読み込んだ画像の縦横比が枠の比率と一致すること(以前は常に正方形だった)"""
     for aspect in (0.5, 1.0, 1.75):
