@@ -13,6 +13,13 @@ export interface CropBox {
   bottom: number;
 }
 
+/**
+ * トリミング枠の中に重ねて描く、実際に出力される輪郭。
+ * 座標は枠を 0..1 に正規化したもの(x は右、y は下が正)。
+ * null は「枠そのものが出力範囲」= 正方形/長方形のとき。
+ */
+export type CropOutline = { points: [number, number][] } | null;
+
 /** 両方式で共通のパラメータ */
 export interface CommonParams {
   gamma: number;

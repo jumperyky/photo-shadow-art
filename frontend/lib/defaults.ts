@@ -1,5 +1,6 @@
 import type {
   CropBox,
+  CropOutline,
   LithophaneParams,
   Mode,
   ShadowArtParams,
@@ -70,6 +71,50 @@ export function cropAspect(
   if (params.sides !== null) return 1;
   if (params.shape === "rectangle") return 1 / params.aspect;
   return 1;
+}
+
+/**
+ * トリミング枠の中に重ねて表示する輪郭を返す。
+ *
+ * 円や六角形を選んでいるとき、枠は正方形のままなので「四隅は捨てられる」
+ * ことが見た目から分からない。実際に出力される形を枠の中に描いておくと、
+ * 顔が角で切れるといった事故を防げる。
+ *
+ * 形は line_art_stl.make_shape_polygon() と同じ式で出している。片方だけ
+ * 変えると表示と出力がずれるので、追加するときは両方に入れること。
+ * バックエンドは画像を [-R, R]^2 に貼ってから形状で切り抜くので、
+ * 枠 = その正方形、輪郭 = そこに内接する形、という対応になる。
+ */
+export function cropOutline(
+  mode: Mode,
+  params: ShadowArtParams,
+): CropOutline {
+  if (mode === "lithophane") return null;
+
+  // sides 指定時は n角形が shape より優先される(backend の effective_shape と同じ)
+  const sides =
+    params.sides !== null
+      ? params.sides
+      : params.shape === "circle"
+        ? 240
+        : params.shape === "hexagon"
+          ? 6
+          : null;
+  if (sides === null) return null; // square / rectangle は枠と一致する
+
+  // 六角形だけ 30 度回して平らな辺を左右に持ってくる
+  const offset =
+    params.sides === null && params.shape === "hexagon"
+      ? Math.PI / 6
+      : Math.PI / 2;
+
+  const points: [number, number][] = [];
+  for (let i = 0; i < sides; i++) {
+    const t = (2 * Math.PI * i) / sides + offset;
+    // SVG は y が下向きなので符号を反転する
+    points.push([0.5 + 0.5 * Math.cos(t), 0.5 - 0.5 * Math.sin(t)]);
+  }
+  return { points };
 }
 
 /** 画像全体を、指定アスペクト比に収まる最大の中央矩形にする */

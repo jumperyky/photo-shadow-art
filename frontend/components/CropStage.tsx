@@ -2,16 +2,20 @@
 
 import { useCallback, useMemo } from "react";
 import ReactCrop, { type PercentCrop } from "react-image-crop";
-import type { CropBox } from "@/lib/types";
+import type { CropBox, CropOutline } from "@/lib/types";
 
 /**
  * 画像のトリミングUI。
  * 出力形状(shape / aspect)から決まる比率に固定されるので、
  * 「UI上で見えている枠 = 実際に出力される範囲」になる。
+ *
+ * 円やn角形のように枠より内側でしか出力されない形状では、outline に
+ * その輪郭を渡す。枠の中に形が重ねて描かれ、捨てられる四隅が暗くなる。
  */
 export function CropStage({
   src,
   aspect,
+  outline,
   crop,
   onChange,
   onComplete,
@@ -20,6 +24,8 @@ export function CropStage({
   src: string;
   /** undefined なら自由な比率で切り抜ける(リソフェイン) */
   aspect?: number;
+  /** 枠の中に重ねる出力形状。null なら枠がそのまま出力範囲 */
+  outline?: CropOutline;
   crop: CropBox | null;
   onChange: (box: CropBox) => void;
   onComplete?: () => void;
@@ -49,6 +55,31 @@ export function CropStage({
     [onChange],
   );
 
+  const addon = useMemo(() => {
+    if (!outline) return undefined;
+    const poly = outline.points.map((p) => p.join(",")).join(" ");
+    // 枠(0,0)-(1,1) から輪郭をくり抜いたパス。evenodd で内側が穴になるので、
+    // 「枠の中だが出力されない」四隅だけが暗くなる。
+    const cut = `M0,0 H1 V1 H0 Z M${outline.points
+      .map((p) => p.join(","))
+      .join(" L")} Z`;
+    return () => (
+      <svg
+        className="crop-outline"
+        viewBox="0 0 1 1"
+        preserveAspectRatio="none"
+        aria-hidden="true"
+      >
+        <path d={cut} fillRule="evenodd" className="crop-outline-mask" />
+        <polygon
+          points={poly}
+          className="crop-outline-edge"
+          vectorEffect="non-scaling-stroke"
+        />
+      </svg>
+    );
+  }, [outline]);
+
   return (
     <div className="crop-stage">
       <ReactCrop
@@ -58,6 +89,7 @@ export function CropStage({
         minWidth={16}
         onChange={handleChange}
         onComplete={() => onComplete?.()}
+        renderSelectionAddon={addon}
       >
         {/* next/image はプロキシ経由の動的画像と相性が悪いので素の img を使う */}
         {/* eslint-disable-next-line @next/next/no-img-element */}

@@ -28,6 +28,7 @@ import {
   MODE_LABELS,
   centeredCrop,
   cropAspect,
+  cropOutline,
 } from "@/lib/defaults";
 import type { MeshData } from "@/lib/mesh";
 import type {
@@ -102,6 +103,13 @@ export default function Page() {
   const litho = mode === "lithophane";
   const common = litho ? lithoParams : shadowParams;
   const aspect = cropAspect(mode, shadowParams);
+  // 形状が変わったときだけ作り直す。毎レンダーで新しい配列を返すと
+  // ReactCrop(PureComponent)が描き直され、ドラッグが重くなる。
+  const outline = useMemo(
+    () => cropOutline(mode, shadowParams),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [mode, shadowParams.shape, shadowParams.sides],
+  );
   const abortRef = useRef<AbortController | null>(null);
   const meshAbortRef = useRef<AbortController | null>(null);
 
@@ -341,6 +349,7 @@ export default function Page() {
                 <CropStage
                   src={imageUrl(image.image_id)}
                   aspect={aspect}
+                  outline={outline}
                   crop={crop}
                   onChange={setCrop}
                 />
@@ -398,7 +407,9 @@ export default function Page() {
               <p className="muted" style={{ margin: 0 }}>
                 {litho
                   ? "リソフェインは板の縦横比がトリミングでそのまま決まるので、比率は自由に切り抜けます。明暗の差がはっきりした写真ほどきれいに出ます。"
-                  : "枠の比率は右の「形状」設定に連動します。顔がはっきり大きく写るように寄せると、線の陰影で表情が出やすくなります。"}
+                  : outline
+                    ? "枠の中の点線が実際に出力される形です。暗くなっている四隅は切り落とされるので、顔がこの形の内側に収まるように寄せてください。"
+                    : "枠の比率は右の「形状」設定に連動します。顔がはっきり大きく写るように寄せると、線の陰影で表情が出やすくなります。"}
               </p>
             </Panel>
           ) : null}
