@@ -339,7 +339,15 @@ def build_mesh(litho, validate=False):
 
     # thickness は行0が画像の上端。_surface_points は行が増えるとZが増える
     # (=行0が下端)並びなので、ここで上下を合わせる。
-    thickness_bottom_up = litho.thickness[::-1]
+    #
+    # 列も左右反転させている。凹凸のある面(outer, +Y)を意図した鑑賞側
+    # ([up=+Z]で+Y側から見る)から見ると、up×zaxisの向きの都合で
+    # 画面の右がワールド座標の-Xになる。列インデックスをそのまま+Xに
+    # 使うと(=反転しないと)、写真の左端が画面の右に来て鏡写しになる。
+    # ここで列を反転させ、位置(x=u(col))は_surface_points側のまま変えず、
+    # 「どの列の厚みをどの位置に置くか」だけを入れ替えることで、
+    # 面の巻き方(_grid_faces/_wall_faces)には一切影響を与えずに直せる。
+    thickness_bottom_up = litho.thickness[::-1, ::-1]
 
     inner = _surface_points(litho, 0.0)
     outer = _surface_points(litho, thickness_bottom_up)

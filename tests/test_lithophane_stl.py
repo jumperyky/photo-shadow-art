@@ -179,6 +179,32 @@ def test_normals_point_outward():
     assert top[:, 1].mean() > 0.5
 
 
+def test_outer_surface_is_not_mirrored():
+    """
+    凹凸のある面(表面, +Y)は「+Y側から、up=+Zで見る」のが正しい鑑賞方向
+    (README/3Dビューアの前提)。このとき画面の右はワールド座標の -X になる
+    (three.js Matrix4.lookAt: xAxis = up × (eye-target)
+     = (0,0,1) × (0,1,0) = (-1,0,0))。
+
+    ramp_image() は左が黒(=既定で厚い)、右が白(=薄い)。よって表面を
+    正しい向きから見たとき、画面の右(=ワールドXが小さい側)には
+    「画像の右端=薄い」が来るはずで、画面の左(Xが大きい側)には
+    「画像の左端=厚い」が来るはずである。ここが入れ替わっていれば
+    鏡写しになっている。
+    """
+    lit = lp.build_lithophane(ramp_image(w=64, h=32), width_mm=100.0,
+                              min_thickness=0.6, max_thickness=3.0, samples=64)
+    mesh = lp.build_mesh(lit)
+    nz, nx = lit.thickness.shape
+    outer = mesh.vertices[nz * nx:].reshape(nz, nx, 3)
+
+    thickness_at_x0 = outer[:, 0, 1].mean()     # x=0   (画面の右)
+    thickness_at_xmax = outer[:, -1, 1].mean()  # x=幅 (画面の左)
+
+    assert math.isclose(thickness_at_x0, lit.min_thickness, abs_tol=1e-6)
+    assert math.isclose(thickness_at_xmax, lit.max_thickness, abs_tol=1e-6)
+
+
 def test_face_count_matches_prediction():
     """UIに表示する三角形数の見積もりが実際と一致すること"""
     for samples in (32, 80):
