@@ -12,6 +12,7 @@ import {
   ApiError,
   detectFace,
   fetchConfig,
+  fetchMesh,
   fetchPreview,
   fetchStl,
   imageUrl,
@@ -28,6 +29,7 @@ import {
   centeredCrop,
   cropAspect,
 } from "@/lib/defaults";
+import type { MeshData } from "@/lib/mesh";
 import type {
   AppConfig,
   CropBox,
@@ -38,9 +40,14 @@ import type {
   Quality,
   ShadowArtParams,
   UploadResponse,
+  ViewMode,
 } from "@/lib/types";
 
 const PREVIEW_DEBOUNCE_MS = 280;
+
+// 3Dはメッシュ生成と転送(数百KB〜1MB)を伴うので、2Dより長めに待つ。
+// スライダーを動かしている最中に何度も投げないための間隔。
+const MESH_DEBOUNCE_MS = 650;
 
 const FALLBACK_MODES: ModeInfo[] = [
   {
@@ -71,6 +78,11 @@ export default function Page() {
   const [previewBusy, setPreviewBusy] = useState(false);
   const [previewError, setPreviewError] = useState<string | null>(null);
 
+  const [view, setView] = useState<ViewMode>("2d");
+  const [mesh, setMesh] = useState<MeshData | null>(null);
+  const [meshBusy, setMeshBusy] = useState(false);
+  const [meshError, setMeshError] = useState<string | null>(null);
+
   const [uploadBusy, setUploadBusy] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
 
@@ -91,6 +103,7 @@ export default function Page() {
   const common = litho ? lithoParams : shadowParams;
   const aspect = cropAspect(mode, shadowParams);
   const abortRef = useRef<AbortController | null>(null);
+  const meshAbortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     setCanPickSaveLocation(supportsSavePicker());
@@ -150,6 +163,8 @@ export default function Page() {
         const res = await uploadImage(file);
         setImage(res);
         setPreview(null);
+        setMesh(null);
+        setMeshError(null);
         setCrop(centeredCrop(res.width, res.height, aspect));
         setFilename(suggestName(file.name, mode));
         if (common.auto_face && config?.face_detection_available) {
@@ -218,12 +233,45 @@ export default function Page() {
 
   useEffect(() => () => abortRef.current?.abort(), []);
 
+  // -------------------------------------------------------- 3Dメッシュ
+  // 3Dタブを開いているときだけ取りに行く。2Dで作業している間は
+  // 重いメッシュ生成を走らせない。
+  useEffect(() => {
+    if (!image || view !== "3d") return;
+    const timer = setTimeout(() => {
+      meshAbortRef.current?.abort();
+      const ac = new AbortController();
+      meshAbortRef.current = ac;
+      setMeshBusy(true);
+
+      fetchMesh(mode, image.image_id, shadowParams, lithoParams, crop, "medium", ac.signal)
+        .then((res) => {
+          setMesh(res);
+          setMeshError(null);
+        })
+        .catch((e) => {
+          if ((e as Error).name === "AbortError") return;
+          setMeshError((e as Error).message);
+        })
+        .finally(() => {
+          if (!ac.signal.aborted) setMeshBusy(false);
+        });
+    }, MESH_DEBOUNCE_MS);
+
+    return () => clearTimeout(timer);
+  }, [view, mode, image, shadowParams, lithoParams, crop]);
+
+  useEffect(() => () => meshAbortRef.current?.abort(), []);
+
   // ------------------------------------------------------------ モード切替
   const handleModeChange = useCallback(
     (next: Mode) => {
       if (next === mode) return;
       setMode(next);
       setPreview(null);
+      // 方式が変われば形状も別物なので、前のメッシュは破棄する
+      setMesh(null);
+      setMeshError(null);
       setStlDone(null);
       setStlError(null);
       setFilename((prev) => swapModeSuffix(prev, mode, next));
@@ -322,6 +370,8 @@ export default function Page() {
                     onClick={() => {
                       setImage(null);
                       setPreview(null);
+                      setMesh(null);
+                      setMeshError(null);
                       setCrop(null);
                       setFaceMessage(null);
                     }}
@@ -359,10 +409,15 @@ export default function Page() {
           <Panel step={3} title="プレビュー">
             <PreviewStage
               mode={mode}
+              view={view}
+              onViewChange={setView}
               preview={preview}
               busy={previewBusy}
               error={previewError}
               hasImage={!!image}
+              mesh={mesh}
+              meshBusy={meshBusy}
+              meshError={meshError}
             />
           </Panel>
 

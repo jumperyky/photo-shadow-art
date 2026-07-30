@@ -132,6 +132,24 @@ class LithophanePreviewRequest(LithophaneParams, PreviewOptions):
     pass
 
 
+class MeshOptions(BaseModel):
+    """3Dプレビュー用。STLより粗いメッシュをブラウザに渡す。"""
+    # 転送量と生成時間を抑えるための解像度。UIからは変えない想定だが、
+    # 端末性能に応じて調整できるよう残してある。
+    mesh_detail: Literal["low", "medium"] = "medium"
+
+
+class ShadowArtMeshRequest(ShadowArtParams, MeshOptions):
+    pass
+
+
+class LithophaneMeshRequest(LithophaneParams, MeshOptions):
+    pass
+
+
+AnyMeshRequest = Union[ShadowArtMeshRequest, LithophaneMeshRequest]
+
+
 class ExportOptions(BaseModel):
     filename: Optional[str] = Field(default=None, max_length=120)
     quality: Literal["draft", "normal", "fine"] = "normal"

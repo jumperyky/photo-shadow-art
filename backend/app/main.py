@@ -20,6 +20,7 @@ Next.jsのUIから2種類のSTL生成を呼び出すFastAPIサーバー。
     GET  /api/images/{id}   アップロード済み画像の取得(クロップUI表示用)
     POST /api/detect-face   顔検出による自動クロップ範囲の算出
     POST /api/preview       パラメータからPNGプレビューを生成
+    POST /api/mesh          3Dプレビュー用の軽量メッシュ(独自バイナリ)
     POST /api/stl           STLを生成してダウンロード
 """
 
@@ -35,6 +36,7 @@ import unicodedata
 from pathlib import Path
 from urllib.parse import quote
 
+import numpy as np
 from fastapi import Body, FastAPI, File, HTTPException, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -49,6 +51,7 @@ import photo_common as pc  # noqa: E402
 
 from . import storage  # noqa: E402
 from .schemas import (  # noqa: E402
+    AnyMeshRequest,
     AnyPreviewRequest,
     AnyStlRequest,
     ConfigResponse,
@@ -56,6 +59,7 @@ from .schemas import (  # noqa: E402
     FaceDetectRequest,
     FaceDetectResponse,
     FaceRect,
+    LithophaneMeshRequest,
     LithophanePreviewRequest,
     LithophaneStlRequest,
     ModeInfo,
@@ -86,6 +90,12 @@ SHADOW_SAMPLES = {"preview": 220, "draft": 260, "normal": 420, "fine": 700}
 
 # リソフェインの分割数の倍率。ユーザー指定の samples に対して品質で調整する。
 LITHO_QUALITY_SCALE = {"draft": 0.5, "normal": 1.0, "fine": 1.5}
+
+# 3Dプレビューの解像度。実測で medium なら
+#   シャドウアート 約2.2万面 / 0.4MB、リソフェイン 約7.7万面 / 1.3MB
+# に収まり、生成も0.2秒以内。回転させながら調整できる程度の軽さを優先する。
+MESH_SHADOW_SAMPLES = {"low": 90, "medium": 140}
+MESH_LITHO_SAMPLES = {"low": 80, "medium": 120}
 
 SHADOW_ART_DEFAULTS = {
     "shape": "square", "aspect": 1.0, "diameter": 150.0, "lines": 48,
@@ -266,6 +276,53 @@ def _png_data_url(img) -> str:
     return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
 
 
+def _mesh_response(mesh, req, size: SizeInfo) -> Response:
+    """
+    3Dプレビュー用のメッシュを独自バイナリで返す。
+
+    STLは1三角形あたり50バイト(頂点を共有しない)なので、同じ形状でも
+    インデックス付きのこの形式なら 1/3 以下になる。glTF等を使うほどの
+    情報量(マテリアル・階層)は不要なので、最小限の構造にしてある。
+
+    レイアウト (すべてリトルエンディアン):
+        magic   char[4]  "PSAM"
+        version uint32   1
+        n_vert  uint32   頂点数
+        n_index uint32   インデックス数 (= 三角形数 * 3)
+        pos     float32[n_vert * 3]   XYZ (mm)。原点中心・Z上
+        index   uint32[n_index]
+    """
+    import struct
+
+    verts = np.ascontiguousarray(mesh.vertices, dtype=np.float32)
+    faces = np.ascontiguousarray(mesh.faces, dtype=np.uint32)
+
+    # ブラウザ側で毎回中心を計算しなくて済むよう、原点中心に寄せておく。
+    # X/Yは中心、Zは底面を0にする(印刷時の置き方に合わせる)。
+    lo = verts.min(axis=0)
+    hi = verts.max(axis=0)
+    verts[:, 0] -= (lo[0] + hi[0]) / 2.0
+    verts[:, 1] -= (lo[1] + hi[1]) / 2.0
+    verts[:, 2] -= lo[2]
+
+    header = struct.pack("<4sIII", b"PSAM", 1, len(verts), faces.size)
+    body = header + verts.tobytes() + faces.tobytes()
+
+    return Response(
+        content=body,
+        media_type="application/octet-stream",
+        headers={
+            "X-Mode": req.mode,
+            "X-Vertex-Count": str(len(verts)),
+            "X-Face-Count": str(len(faces)),
+            "X-Outer-Size-Mm": (
+                f"{size.outer_width_mm}x{size.outer_height_mm}x{size.outer_depth_mm}"
+            ),
+            "Cache-Control": "no-store",
+        },
+    )
+
+
 def _stl_response(mesh, req, size: SizeInfo) -> Response:
     stl_bytes = mesh.export(file_type="stl")
     if isinstance(stl_bytes, str):
@@ -442,6 +499,35 @@ def _litho_face_count_warning(req, litho):
         f"STLが数百MBになりスライサーが重くなる恐れがあります。"
         f"分割数を下げることを検討してください。"
     ]
+
+
+@app.post("/api/mesh")
+def make_mesh(req: AnyMeshRequest = Body(..., discriminator="mode")):
+    """
+    3Dプレビュー用の軽量メッシュを返す。
+    形状はSTLと同じ作り方だが、解像度を落として転送量と生成時間を抑える。
+    """
+    path = _resolve_image(req.image_id)
+
+    if isinstance(req, LithophaneMeshRequest):
+        # ユーザー指定の分割数より細かくしても意味がないので上限として使う
+        samples = min(req.samples, MESH_LITHO_SAMPLES[req.mesh_detail])
+        litho, _crop, _notices = _build_lithophane(req, path, samples)
+        try:
+            mesh = lp.build_mesh(litho)
+        except (RuntimeError, MemoryError) as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        return _mesh_response(mesh, req, _lithophane_size(litho))
+
+    art, _crop, _notices = _build_shadow_art(
+        req, path, MESH_SHADOW_SAMPLES[req.mesh_detail])
+    try:
+        mesh = la.build_mesh(
+            art, thickness=req.thickness, frame_thickness=req.frame_thickness
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return _mesh_response(mesh, req, _shadow_art_size(art, req))
 
 
 @app.post("/api/stl")

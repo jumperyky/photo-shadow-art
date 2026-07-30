@@ -13,12 +13,14 @@
     "next": "^16.2.12",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
-    "react-image-crop": "^11.0.10"
+    "react-image-crop": "^11.0.10",
+    "three": "^0.185.1"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",
     "@types/react": "^19.0.2",
     "@types/react-dom": "^19.0.2",
+    "@types/three": "^0.185.1",
     "typescript": "^5.7.2"
   }
 }

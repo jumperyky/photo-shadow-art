@@ -1,3 +1,4 @@
+import { decodeMesh, type MeshData } from "./mesh";
 import type {
   AppConfig,
   CropBox,
@@ -152,6 +153,29 @@ export function fetchPreview(
     },
     signal,
   );
+}
+
+/** 3Dプレビュー用の軽量メッシュを取得する */
+export async function fetchMesh(
+  mode: Mode,
+  imageId: string,
+  shadow: ShadowArtParams,
+  litho: LithophaneParams,
+  crop: CropBox | null,
+  detail: "low" | "medium",
+  signal?: AbortSignal,
+): Promise<MeshData> {
+  const res = await fetch(`${BASE}/api/mesh`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      ...requestBody(mode, imageId, shadow, litho, crop),
+      mesh_detail: detail,
+    }),
+    signal,
+  });
+  if (!res.ok) throw await toApiError(res);
+  return decodeMesh(await res.arrayBuffer());
 }
 
 export interface StlResult {

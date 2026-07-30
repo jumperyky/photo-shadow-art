@@ -418,6 +418,134 @@ def test_shadow_art_and_lithophane_share_the_same_crop():
     assert abs(size["design_height_mm"] - 160.0) < 0.5, size
 
 
+# ---------------------------------------------------------------------------
+# 3Dプレビュー用メッシュ
+# ---------------------------------------------------------------------------
+def _decode_mesh(content: bytes):
+    """frontend/lib/mesh.ts と同じ手順でデコードする"""
+    import struct
+
+    import numpy as np
+
+    hdr = struct.calcsize("<4sIII")
+    magic, version, n_vert, n_index = struct.unpack_from("<4sIII", content, 0)
+    assert magic == b"PSAM", magic
+    assert version == 1
+    assert len(content) == hdr + n_vert * 12 + n_index * 4, "サイズがヘッダと合わない"
+    pos = np.frombuffer(content, dtype="<f4", count=n_vert * 3,
+                        offset=hdr).reshape(-1, 3)
+    idx = np.frombuffer(content, dtype="<u4", count=n_index, offset=hdr + n_vert * 12)
+    return pos, idx
+
+
+def test_mesh_shadow_art():
+    image_id = upload()
+    res = client.post("/api/mesh", json={
+        "mode": "shadow_art", "image_id": image_id, "diameter": 150,
+    })
+    assert res.status_code == 200, res.text
+    assert res.headers["x-mode"] == "shadow_art"
+    pos, idx = _decode_mesh(res.content)
+    assert len(pos) == int(res.headers["x-vertex-count"])
+    assert len(idx) // 3 == int(res.headers["x-face-count"])
+    assert idx.max() < len(pos), "インデックスが頂点数を超えている"
+
+
+def test_mesh_is_centered_and_sits_on_bed():
+    """
+    ブラウザ側で座標を触らずに済むよう、XYは中心・Zは底面0で返すこと。
+    ここがずれると3Dビューアでモデルが画面外に飛ぶ。
+    """
+    import numpy as np
+
+    image_id = upload()
+    for body in [
+        {"mode": "shadow_art", "diameter": 150},
+        {"mode": "shadow_art", "shape": "rectangle", "aspect": 1.6, "diameter": 150},
+        {"mode": "lithophane", "width": 100},
+        {"mode": "lithophane", "width": 100, "curve": 90},
+    ]:
+        res = client.post("/api/mesh", json={"image_id": image_id, **body})
+        assert res.status_code == 200, res.text
+        pos, _ = _decode_mesh(res.content)
+        lo, hi = pos.min(axis=0), pos.max(axis=0)
+        assert abs(lo[0] + hi[0]) < 1e-3, f"{body}: X中心がずれている"
+        assert abs(lo[1] + hi[1]) < 1e-3, f"{body}: Y中心がずれている"
+        assert abs(lo[2]) < 1e-4, f"{body}: Z底面が0でない"
+        assert np.all(hi - lo > 0), f"{body}: 潰れている"
+
+
+def test_mesh_orientation_per_mode():
+    """
+    印刷時の置き方が保たれること。
+      シャドウアート: 寝た板 → 厚み(Z)が最も薄い
+      リソフェイン  : 立った板 → 厚み(Y)が最も薄い
+    ここが崩れると3Dビューアの初期カメラ向きが噛み合わなくなる。
+    """
+    image_id = upload()
+
+    pos, _ = _decode_mesh(client.post("/api/mesh", json={
+        "mode": "shadow_art", "image_id": image_id, "diameter": 150,
+        "thickness": 2.0, "frame_thickness": 2.0,
+    }).content)
+    span = pos.max(axis=0) - pos.min(axis=0)
+    assert span[2] < span[0] and span[2] < span[1], f"シャドウアートの向き {span}"
+    assert abs(span[2] - 2.0) < 1e-3
+
+    pos, _ = _decode_mesh(client.post("/api/mesh", json={
+        "mode": "lithophane", "image_id": image_id, "width": 100,
+        "max_thickness": 3.0,
+    }).content)
+    span = pos.max(axis=0) - pos.min(axis=0)
+    assert span[1] < span[0] and span[1] < span[2], f"リソフェインの向き {span}"
+    assert abs(span[1] - 3.0) < 1e-3
+
+
+def test_mesh_is_much_lighter_than_stl():
+    """3Dプレビュー用メッシュがSTLよりはるかに軽いこと(対話的に使えるように)"""
+    image_id = upload()
+    mesh = client.post("/api/mesh", json={
+        "mode": "lithophane", "image_id": image_id, "width": 100, "samples": 400,
+    })
+    stl = client.post("/api/stl", json={
+        "mode": "lithophane", "image_id": image_id, "width": 100, "samples": 400,
+        "quality": "normal",
+    })
+    assert mesh.status_code == 200 and stl.status_code == 200
+    assert len(mesh.content) < len(stl.content) / 10, (
+        f"メッシュ {len(mesh.content)} / STL {len(stl.content)}"
+    )
+
+
+def test_mesh_respects_user_samples_as_upper_bound():
+    """ユーザーが分割数を下げたら、プレビューもそれ以上には細かくしないこと"""
+    image_id = upload()
+    coarse = client.post("/api/mesh", json={
+        "mode": "lithophane", "image_id": image_id, "samples": 40,
+    })
+    default = client.post("/api/mesh", json={
+        "mode": "lithophane", "image_id": image_id, "samples": 400,
+    })
+    assert int(coarse.headers["x-face-count"]) < int(default.headers["x-face-count"])
+
+
+def test_mesh_detail_levels():
+    image_id = upload()
+    counts = {}
+    for detail in ("low", "medium"):
+        res = client.post("/api/mesh", json={
+            "mode": "lithophane", "image_id": image_id, "mesh_detail": detail,
+        })
+        assert res.status_code == 200, res.text
+        counts[detail] = int(res.headers["x-face-count"])
+    assert counts["low"] < counts["medium"], counts
+
+
+def test_mesh_requires_mode():
+    image_id = upload()
+    assert client.post("/api/mesh", json={"image_id": image_id}).status_code == 422
+
+
 if __name__ == "__main__":
     failures = 0
     for name, fn in sorted(globals().items()):

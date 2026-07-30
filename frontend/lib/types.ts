@@ -3,6 +3,9 @@ export type Mode = "shadow_art" | "lithophane";
 
 export type ShapeName = "square" | "rectangle" | "circle" | "hexagon";
 
+/** プレビューの表示方法。2D画像か、three.jsによる3D表示か。 */
+export type ViewMode = "2d" | "3d";
+
 export interface CropBox {
   left: number;
   top: number;

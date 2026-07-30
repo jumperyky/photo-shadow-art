@@ -1,59 +1,103 @@
 "use client";
 
 import { Message } from "./Controls";
+import { MeshViewer } from "./MeshViewer";
 import { MAX_PRINT_SIZE_MM } from "@/lib/defaults";
-import type { Mode, PreviewResponse } from "@/lib/types";
+import type { MeshData } from "@/lib/mesh";
+import type { Mode, PreviewResponse, ViewMode } from "@/lib/types";
 
 export function PreviewStage({
   mode,
+  view,
+  onViewChange,
   preview,
   busy,
   error,
   hasImage,
+  mesh,
+  meshBusy,
+  meshError,
 }: {
   mode: Mode;
+  view: ViewMode;
+  onViewChange: (v: ViewMode) => void;
   preview: PreviewResponse | null;
   busy: boolean;
   error: string | null;
   hasImage: boolean;
+  mesh: MeshData | null;
+  meshBusy: boolean;
+  meshError: string | null;
 }) {
   const size = preview?.size;
   const overLimit = size ? !size.within_print_limit : false;
   const litho = mode === "lithophane";
+  const is3d = view === "3d";
 
   return (
     <>
-      <div className={`preview-stage${litho ? " backlit" : ""}`}>
-        {preview ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={preview.image}
-            alt={
-              litho
-                ? "裏から光を当てたときの見え方のプレビュー"
-                : "生成される形状のプレビュー"
-            }
-          />
-        ) : (
-          <p className="preview-empty">
-            {hasImage
-              ? "プレビューを生成しています…"
-              : "写真をアップロードすると、ここに仕上がりのプレビューが表示されます。"}
-          </p>
-        )}
-        {busy ? (
-          <div className="preview-busy">
-            <span className="spinner" aria-hidden="true" />
-            更新中
-          </div>
-        ) : null}
+      <div className="view-tabs" role="tablist" aria-label="プレビューの表示方法">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={!is3d}
+          onClick={() => onViewChange("2d")}
+        >
+          {litho ? "2D（光の見え方）" : "2D（形状）"}
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={is3d}
+          onClick={() => onViewChange("3d")}
+        >
+          3D
+        </button>
       </div>
 
-      {litho && preview ? (
+      {is3d ? (
+        <MeshViewer mesh={mesh} mode={mode} busy={meshBusy} error={meshError} />
+      ) : (
+        <div className={`preview-stage${litho ? " backlit" : ""}`}>
+          {preview ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={preview.image}
+              alt={
+                litho
+                  ? "裏から光を当てたときの見え方のプレビュー"
+                  : "生成される形状のプレビュー"
+              }
+            />
+          ) : (
+            <p className="preview-empty">
+              {hasImage
+                ? "プレビューを生成しています…"
+                : "写真をアップロードすると、ここに仕上がりのプレビューが表示されます。"}
+            </p>
+          )}
+          {busy ? (
+            <div className="preview-busy">
+              <span className="spinner" aria-hidden="true" />
+              更新中
+            </div>
+          ) : null}
+        </div>
+      )}
+
+      {is3d ? (
+        mesh ? (
+          <p className="muted preview-caption">
+            {`プリントベッドに置いた状態で表示しています。表示用に粗くした${mesh.triangleCount.toLocaleString()}三角形のモデルなので、実際の出力はこれより滑らかです。`}
+          </p>
+        ) : null
+      ) : litho && preview ? (
         <p className="muted preview-caption">
           裏から光を当てたときの見え方をシミュレートしています。
         </p>
       ) : null}
+
+      {meshError && is3d ? <Message kind="error">{meshError}</Message> : null}
 
       {size ? (
         <div className="chips">
