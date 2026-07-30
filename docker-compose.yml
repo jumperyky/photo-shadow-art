@@ -1,0 +1,26 @@
+# NAS等で常時起動するための構成。
+#
+#   docker compose up --build -d     # ビルドして起動
+#   docker compose logs -f            # ログを見る
+#   docker compose down               # 停止
+#
+# 起動後は http://<NASのIP>:8000 で開ける。
+# 別のLAN(外出先など)から使う場合は、NAS自体をTailscale等のVPNに
+# 参加させ、Tailscaleのアドレスでアクセスする(README「NASで常時起動する」参照)。
+# APIは無認証のため、ルーターのポート開放による直接の外部公開は避けること。
+
+services:
+  photo-shadow-art:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      # アップロード画像置き場。TTL(既定6時間)で自動削除されるので必須ではないが、
+      # コンテナ再起動をまたいで作業中の画像を残したい場合につけておく。
+      - psa-data:/data
+    # フロントとAPIは同一オリジン(同じポート)から配信されるため、
+    # CORSの設定(PSA_CORS_ORIGINS)は通常このモードでは使われない。
+
+volumes:
+  psa-data:

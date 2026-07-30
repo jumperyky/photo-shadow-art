@@ -57,6 +57,8 @@ photo-shadow-art/
 ├── requirements.txt         ← コア(CLI)の依存
 ├── setup.sh                 ← 初回セットアップ(venv + 依存インストール)
 ├── dev.sh                   ← API + UI をまとめて起動する開発用スクリプト
+├── Dockerfile               ← NAS等で常時起動する場合のシングルコンテナ構成
+├── docker-compose.yml       ← ↑の起動設定(3-6参照)
 ├── photo_common.py          ← 両方式で共通: 画像の読み込み・前処理・顔検出
 ├── line_art_stl.py          ← シャドウアート(CLI兼ライブラリ)
 ├── lithophane_stl.py        ← リソフェイン(CLI兼ライブラリ)
@@ -221,6 +223,54 @@ python3 -m pytest tests/ -q            # pytest があればこちらでも可
 
 cd frontend && npm run typecheck && npm run build
 ```
+
+### 3-6. NASで常時起動する(Docker)
+
+3-4 の方法は同じLAN内限定で、かつPCを起動しておく必要がある。
+**別のLAN(自宅と外出先など)からも使いたい場合**は、NASにDockerで
+常時起動しておき、Tailscale等のVPNでアクセスする構成がおすすめ。
+
+**この構成にした理由(検証結果):**
+- Vercelは不向き。Function応答上限(4.5MB)を高精細STL(最大約6MB)が
+  超える、依存(opencv-python-headless等)がバンドルサイズを圧迫する、
+  ファイルシステムが揮発・非共有でアップロード→プレビュー→STLの流れが
+  別インスタンスに当たると画像が見つからなくなる、の3点が実害になる。
+- 同じLAN内の2台構成だけなら3-4のとおりDockerなしでも足りる。
+  Dockerが効くのはPCを起動しておかなくてよくなる点と、2台目に
+  Python/Node/OpenCVを入れ直さなくてよい点。
+- このアプリは全ページが静的(`page.tsx`はクライアントコンポーネントのみで
+  サーバー専用APIは未使用)なので、Next.jsのサーバープロセス自体が不要。
+  `output: "export"` で静的ファイルに書き出し、FastAPIから直接配信すれば
+  コンテナ1つ・ポート1つ・単一プロセスで完結する。
+- 実測(4コアCPU相当のコンテナ): アイドル74MB、プレビュー生成時94MB、
+  STL 1800mm・高精細生成時でもピーク219MB。UGREENのDXPシリーズ
+  (8GBモデル)であれば他の常駐サービスと同居させても余裕がある。
+
+**起動方法:**
+
+```bash
+docker compose up --build -d   # ビルドして常時起動(再起動しても自動復帰)
+docker compose logs -f          # ログを見る
+docker compose down             # 停止
+```
+
+起動後は `http://<NASのIP>:8000` を開く。フロントとAPIが同一オリジン
+(同じポート)から配信されるため、CORSやAPIのURL設定は不要。
+アップロード画像はコンテナ内の一時ディレクトリ(TTL既定6時間)に
+置かれるので、`docker-compose.yml` のボリュームはコンテナ再起動をまたいで
+作業中の画像を残したい場合の保険程度でよい。
+
+**別のLANから使う(Tailscale):**
+
+1. NAS本体(またはコンテナ)にTailscaleを入れて同じtailnetに参加させる
+2. 手元のPC/スマホにもTailscaleを入れて同じtailnetに参加させる
+3. NASのTailscaleアドレス(`100.x.x.x` または MagicDNSのホスト名)+
+   `:8000` でアクセスする。物理的にどこにいても同じLANにいるかのように
+   繋がる。
+
+> **注意:** APIは無認証。ルーターのポート開放やDDNSでの直接の外部公開は
+> 避けること(Tailscale経由なら、tailnetに参加していない第三者からは
+> 到達できないため安全)。
 
 ## 4. GUIの使い方
 
@@ -478,6 +528,16 @@ index   uint32[n_index]
 - **レンダー中に `window` を見ない。** 保存先ダイアログの対応可否をレンダー中に
   判定していたところ、SSRの結果と食い違ってハイドレーションが壊れ(React #418)、
   開発モードでページ全体が無反応になった。マウント後に `useEffect` で判定すること。
+- **静的エクスポート(`output: "export"`)は環境変数で切り替える、常時onにしない。**
+  `rewrites()` は静的エクスポートと共存できない(サーバーがないため)ので、
+  `next.config.mjs` は `NEXT_OUTPUT_EXPORT=1` のときだけ `output: "export"` を
+  設定し、`rewrites()` を外す形にしてある。常にexportにすると、`./dev.sh` の
+  `npm run dev` でAPIへのプロキシが効かなくなり、ローカル開発が壊れる。
+- **FastAPIの静的配信は全APIルートの後ろでmountする。** `frontend/out`
+  (静的エクスポート結果)を `app.mount("/", StaticFiles(...))` するコードは
+  `main.py` の一番最後に置いてある。先に置くと `/api/*` より前にマッチして
+  APIが静的配信に覆い隠されてしまう。`frontend/out` が無ければ何もしないので、
+  ローカル開発(`./dev.sh`)の挙動には影響しない。
 
 ## 9. このバージョンで直したバグ
 

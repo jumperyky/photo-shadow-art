@@ -607,3 +607,21 @@ def make_stl(req: AnyStlRequest = Body(..., discriminator="mode")):
     except RuntimeError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return _stl_response(mesh, req, _shadow_art_size(art, req))
+
+
+# ---------------------------------------------------------------------------
+# フロントエンドの静的配信(NAS等でのシングルコンテナ運用向け)
+# ---------------------------------------------------------------------------
+# `NEXT_OUTPUT_EXPORT=1 npm run build` で書き出した frontend/out/ があれば、
+# それをそのまま配信する。Next.jsのサーバープロセスが不要になり、
+# コンテナ1つ・ポート1つで完結する(README「NASで常時起動する」参照)。
+#
+# 通常のローカル開発(./dev.sh)では frontend/out/ が存在しないため、
+# この節は何もせず、Next.js の dev サーバー(:3000)を別途使う従来通りの
+# 構成のままになる。すべての /api/* ルートより後ろで mount することで、
+# 静的配信がAPIルートを覆い隠さないようにしている。
+_FRONTEND_DIST = REPO_ROOT / "frontend" / "out"
+if _FRONTEND_DIST.is_dir():
+    from fastapi.staticfiles import StaticFiles
+
+    app.mount("/", StaticFiles(directory=_FRONTEND_DIST, html=True), name="frontend")

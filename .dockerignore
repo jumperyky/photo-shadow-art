@@ -1,0 +1,11 @@
+**/node_modules
+**/.next
+**/out
+**/__pycache__
+**/*.pyc
+.venv
+venv
+.git
+*.stl
+tests
+.pytest_cache

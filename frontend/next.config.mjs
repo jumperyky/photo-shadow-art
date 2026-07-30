@@ -14,14 +14,32 @@ const allowedDevOrigins = (process.env.NEXT_ALLOWED_DEV_ORIGINS ?? "")
   .map((s) => s.trim())
   .filter(Boolean);
 
+// NAS等にDockerで常時起動する構成向け。このアプリは全ページが静的
+// (page.tsxは "use client" のみで、サーバー専用APIは使っていない)ので、
+// `output: "export"` でビルド結果を静的ファイルに書き出し、FastAPIから
+// 直接配信できる。これによりNext.jsのサーバープロセス自体が不要になり、
+// コンテナ1つ・ポート1つ・単一プロセスで完結する(README参照)。
+//
+// ローカル開発 (`./dev.sh` / `npm run dev`) には影響しない。開発時は
+// この変数を設定しないので、これまで通りNextのdevサーバー+rewritesの
+// プロキシ構成のまま動く。
+const STATIC_EXPORT = process.env.NEXT_OUTPUT_EXPORT === "1";
+
 const nextConfig = {
   reactStrictMode: true,
+  ...(STATIC_EXPORT ? { output: "export" } : {}),
   ...(allowedDevOrigins.length > 0 ? { allowedDevOrigins } : {}),
   // /api/* をPython APIへプロキシする。フロントからは常に同一オリジンで叩けるので
   // CORSやAPI URLの環境差を気にしなくてよい。
-  async rewrites() {
-    return [{ source: "/api/:path*", destination: `${API_BASE}/api/:path*` }];
-  },
+  // 静的エクスポート時は rewrites 自体が使えない(サーバーがないため)。
+  // かわりにFastAPIが同一オリジンで /api/* をそのまま処理する。
+  ...(STATIC_EXPORT
+    ? {}
+    : {
+        async rewrites() {
+          return [{ source: "/api/:path*", destination: `${API_BASE}/api/:path*` }];
+        },
+      }),
 };
 
 export default nextConfig;
