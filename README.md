@@ -165,13 +165,53 @@ CORSの設定を気にする必要はありません(APIのURLを変えたい場
 ブラウザが直接触るのは Next.js(:3000)だけで、APIへの中継は同一マシン内で
 完結するため、APIがLANに露出することはありません。
 
-> **別のPCからも使いたい場合(未対応):**
-> 本番モード(`npm run build && npm start`)なら `http://<PCのIP>:3000` で
-> LAN内の別端末から使えることを確認済み。ただし `./dev.sh` が使う開発モードは
-> Next.js 16 のクロスオリジン保護(`allowedDevOrigins`)により別端末からは
-> 動かない。対応する場合は `next.config.mjs` に `allowedDevOrigins` の設定が必要。
+### 3-4. 他の端末(スマホなど)から使う
 
-### 3-4. テスト
+写真をスマホのカメラで撮ってそのままアップロードしたい、といった場合に、
+同じWi-Fi(LAN)内の別端末からPCの開発サーバーを開けるようにする手順。
+
+1. **PCのIPアドレスを調べる**
+   - Windows: `ipconfig` の「IPv4 アドレス」(例: `192.168.1.42`)
+   - macOS/Linux: `ipconfig getifaddr en0` または `hostname -I`
+   - `npm run dev` / `./dev.sh` を実行したときに出る `Network: http://...` の
+     行でも確認できる(ポート番号は3000で固定なので、そのIP部分だけ使う)。
+
+2. **許可するホストを指定して起動する**
+
+   ```bash
+   ./dev.sh                          # 通常起動(localhostのみ)
+   LAN_HOST=192.168.1.42 ./dev.sh    # ↑で調べたIPを指定して起動
+   ```
+
+   個別に起動する場合は、UI側にだけ環境変数 `NEXT_ALLOWED_DEV_ORIGINS` を
+   渡す(カンマ区切りで複数指定可)。APIは他端末から直接触られる必要が
+   ないので `127.0.0.1` のままでよい:
+
+   ```bash
+   cd backend && uvicorn app.main:app --reload --port 8000
+   cd frontend && NEXT_ALLOWED_DEV_ORIGINS=192.168.1.42 npm run dev
+   ```
+
+   > Next.js 16 は開発サーバーへのクロスオリジンリクエストを既定で403で
+   > 拒否する(`allowedDevOrigins`)。指定なしで別端末から開くと、ページの
+   > JSが読み込めず真っ白になったり動作がおかしくなったりするのはこのため。
+   > `next.config.mjs` がこの環境変数を読んで `allowedDevOrigins` に渡している
+   > ので、コード自体は変更しなくてよい。ホスト名だけで判定されるためポート
+   > 番号は不要。
+
+3. **スマホ等のブラウザで `http://192.168.1.42:3000`(調べたIP)を開く**
+
+   PCとスマホが同じLAN(同じWi-Fi)にいることを確認すること。
+   繋がらない場合はWindows/macOSのファイアウォールが受信接続をブロック
+   していないか確認する(Windowsは初回起動時に「プライベートネットワークで
+   許可しますか」というダイアログが出ることが多い)。
+
+> **注意:** STL出力時の「保存先を選ぶダイアログ」(File System Access API)は
+> HTTPSまたはlocalhostでしか動かない(secure context 制限)。LAN内のIPで
+> 開いた場合は自動的に通常のダウンロードにフォールバックするので、機能自体は
+> 使えるが保存先を選ぶUIだけ出ない。
+
+### 3-5. テスト
 
 ```bash
 python3 tests/test_line_art_stl.py     # シャドウアート

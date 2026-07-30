@@ -5,6 +5,7 @@
 #   ./dev.sh                      … http://localhost:3000 で起動
 #   PORT_UI=3100 ./dev.sh         … ポートを変える
 #   PYTHON=/path/to/python ./dev.sh
+#   LAN_HOST=192.168.1.42 ./dev.sh … スマホ等、同じLAN内の別端末から使う
 #
 # 初回は先に ./setup.sh を実行すること。
 set -euo pipefail
@@ -65,11 +66,18 @@ API_PID=$!
 
 echo "→ UI    http://localhost:$PORT_UI"
 (cd "$ROOT/frontend" \
-   && API_BASE_URL="http://127.0.0.1:$PORT_API" PORT="$PORT_UI" exec npm run dev) &
+   && API_BASE_URL="http://127.0.0.1:$PORT_API" PORT="$PORT_UI" \
+      NEXT_ALLOWED_DEV_ORIGINS="${LAN_HOST:-}" exec npm run dev) &
 UI_PID=$!
 
 echo
 echo "ブラウザで http://localhost:$PORT_UI を開いてください（Ctrl+C で停止）"
+if [ -n "${LAN_HOST:-}" ]; then
+  echo "LAN内の別端末からは http://$LAN_HOST:$PORT_UI で開けます。"
+else
+  echo "スマホ等、同じLAN内の別端末から使いたい場合は LAN_HOST=<このPCのIP> ./dev.sh"
+  echo "(詳しくは README『他の端末(スマホなど)から使う』を参照)"
+fi
 
 # npm は next を、uvicorn は --reload のワーカーを子として抱えるため、
 # 直接の子だけ kill すると孫プロセスが残り、次回起動時に
