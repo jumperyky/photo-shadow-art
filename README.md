@@ -167,7 +167,31 @@ CORSの設定を気にする必要はありません(APIのURLを変えたい場
 ブラウザが直接触るのは Next.js(:3000)だけで、APIへの中継は同一マシン内で
 完結するため、APIがLANに露出することはありません。
 
-### 3-4. 他の端末(スマホなど)から使う
+### 3-4. 複数の端末で使うには(方式の選び方)
+
+このアプリは共有すべき永続データを持たない(アップロード画像は6時間で
+自動削除される)ので、**端末ごとに独立したコピーを動かして何も困らない**。
+そのぶん選択肢が3つあり、使う端末の種類で決まる。
+
+| 使いたい端末 | 方式 | 必要なもの |
+|---|---|---|
+| PC・ノートPCが複数 | **各PCに `git clone` + `./setup.sh`** | 各PCにPython 3.10+ / Node 20+ |
+| 同じWi-Fi内のスマホ・タブレット | 3-5 のLAN共有(PCを起動しておく) | PC側の設定のみ |
+| 別のLANからも / PCを起動したくない | 3-6 のNAS + Docker | NASとTailscale等 |
+
+**PC同士なら clone するのが一番簡単。** ただし「フォルダごとコピー」は
+うまくいかない。`frontend/node_modules`(約540MB)と `.venv`(約340MB)には
+OS・CPU依存のバイナリ(`next-swc.linux-x64.node`、`cv2.abi3.so` 等)が
+入っていて、別のOS・別のマシンに移すと動かないため。
+
+gitで管理しているソース本体は **約460KB** しかない。これを `git clone` して
+`./setup.sh` を走らせれば、その端末向けの依存が正しく入る。
+
+> Dockerが効いてくるのは、**Python/Nodeを入れられない端末(スマホ・タブレット)
+> から使いたい場合**と、**環境構築を2回やりたくない場合**、そして
+> **PCを起動しておきたくない場合**の3つ。PC2台で使うだけなら不要。
+
+### 3-5. 同じLAN内の他の端末(スマホなど)から使う
 
 写真をスマホのカメラで撮ってそのままアップロードしたい、といった場合に、
 同じWi-Fi(LAN)内の別端末からPCの開発サーバーを開けるようにする手順。
@@ -213,20 +237,9 @@ CORSの設定を気にする必要はありません(APIのURLを変えたい場
 > 開いた場合は自動的に通常のダウンロードにフォールバックするので、機能自体は
 > 使えるが保存先を選ぶUIだけ出ない。
 
-### 3-5. テスト
-
-```bash
-python3 tests/test_line_art_stl.py     # シャドウアート
-python3 tests/test_lithophane_stl.py   # リソフェイン
-python3 tests/test_api.py              # API(両方式)
-python3 -m pytest tests/ -q            # pytest があればこちらでも可
-
-cd frontend && npm run typecheck && npm run build
-```
-
 ### 3-6. NASで常時起動する(Docker)
 
-3-4 の方法は同じLAN内限定で、かつPCを起動しておく必要がある。
+3-5 の方法は同じLAN内限定で、かつPCを起動しておく必要がある。
 **別のLAN(自宅と外出先など)からも使いたい場合**は、NASにDockerで
 常時起動しておき、Tailscale等のVPNでアクセスする構成がおすすめ。
 
@@ -277,6 +290,17 @@ docker compose down             # 停止
 > **注意:** APIは無認証。ルーターのポート開放やDDNSでの直接の外部公開は
 > 避けること(Tailscale経由なら、tailnetに参加していない第三者からは
 > 到達できないため安全)。
+
+### 3-7. テスト
+
+```bash
+python3 tests/test_line_art_stl.py     # シャドウアート
+python3 tests/test_lithophane_stl.py   # リソフェイン
+python3 tests/test_api.py              # API(両方式)
+python3 -m pytest tests/ -q            # pytest があればこちらでも可
+
+cd frontend && npm run typecheck && npm run build
+```
 
 ## 4. GUIの使い方
 
