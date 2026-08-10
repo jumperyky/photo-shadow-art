@@ -1,19 +1,21 @@
 @echo off
-chcp 65001 >nul
 setlocal
 cd /d "%~dp0"
 
 rem ============================================================
-rem  Photo Shadow Art - 起動 (Windows)
+rem  Photo Shadow Art - launcher for Windows
 rem
-rem    start.bat  … API(:8000) と UI(:3000) を別ウィンドウで起動し、
-rem                 準備ができたらブラウザを開く
+rem    start.bat  : start the API and the UI in separate windows,
+rem                 then open the browser once the UI responds
 rem
-rem  初回は先に setup.bat を実行すること。
-rem  停止するときは開いた2つのウィンドウを閉じる(または Ctrl+C)。
+rem  Run setup.bat first.
+rem  To stop, close the two windows that open, or press Ctrl+C.
 rem
-rem  ポートを変えたい場合:
-rem    set PORT_API=8001 ^&^& set PORT_UI=3100 ^&^& start.bat
+rem  To change ports, from cmd:
+rem    set PORT_API=8001 and set PORT_UI=3100 before running.
+rem
+rem  NOTE on encoding: saved in CP932, must NOT call chcp 65001.
+rem  See the comment in setup.bat for the reason.
 rem ============================================================
 
 if not defined PORT_API set "PORT_API=8000"
@@ -21,32 +23,31 @@ if not defined PORT_UI  set "PORT_UI=3000"
 
 set "PYEXE=%~dp0.venv\Scripts\python.exe"
 
-rem --- セットアップ済みかの確認 -------------------------------
+rem --- check that setup.bat has been run ----------------------
 if not exist "%PYEXE%" goto :no_venv
 if not exist "frontend\node_modules" goto :no_node_modules
 
 "%PYEXE%" -c "import fastapi, uvicorn, shapely, trimesh, mapbox_earcut" 2>nul
 if errorlevel 1 goto :no_deps
 
-rem --- ポートの空き確認 ---------------------------------------
-rem connect_ex が 0 = 誰かが待ち受けている = 使用中
+rem --- port check. connect_ex 0 means something is listening --
 "%PYEXE%" -c "import socket,sys; sys.exit(1 if socket.socket().connect_ex(('127.0.0.1',%PORT_API%))==0 else 0)"
 if errorlevel 1 goto :api_port_busy
 
 "%PYEXE%" -c "import socket,sys; sys.exit(1 if socket.socket().connect_ex(('127.0.0.1',%PORT_UI%))==0 else 0)"
 if errorlevel 1 goto :ui_port_busy
 
-rem --- 起動 ---------------------------------------------------
+rem --- launch -------------------------------------------------
 echo.
-echo   API を起動しています  http://127.0.0.1:%PORT_API%
+echo   API ���N�����Ă��܂�  http://127.0.0.1:%PORT_API%
 start "Photo Shadow Art - API" /d "%~dp0backend" cmd /k ""%PYEXE%" -m uvicorn app.main:app --reload --port %PORT_API%"
 
-echo   UI  を起動しています  http://localhost:%PORT_UI%
+echo   UI  ���N�����Ă��܂�  http://localhost:%PORT_UI%
 start "Photo Shadow Art - UI" /d "%~dp0frontend" cmd /k "set "API_BASE_URL=http://127.0.0.1:%PORT_API%" && set "PORT=%PORT_UI%" && npm run dev"
 
-rem --- UI が応答するまで待ってからブラウザを開く ---------------
+rem --- wait for the UI to answer, then open the browser -------
 echo.
-echo   起動を待っています...
+echo   �N����҂��Ă��܂�...
 set /a TRIES=0
 :wait_ui
 set /a TRIES+=1
@@ -59,11 +60,11 @@ goto :wait_ui
 :ui_ready
 echo.
 echo ============================================
-echo   起動しました
+echo   �N�����܂���
 echo.
 echo   http://localhost:%PORT_UI%
 echo.
-echo   停止するときは開いた2つのウィンドウを閉じてください
+echo   ��~����Ƃ��͊J����2�̃E�B���h�E����Ă�������
 echo ============================================
 start "" "http://localhost:%PORT_UI%"
 timeout /t 3 /nobreak >nul
@@ -71,42 +72,42 @@ exit /b 0
 
 :ui_timeout
 echo.
-echo [警告] UI が時間内に応答しませんでした。
-echo        「Photo Shadow Art - UI」のウィンドウにエラーが出ていないか
-echo        確認してください。
+echo [�x��] UI �����ԓ��ɉ������܂���ł����B
+echo        �uPhoto Shadow Art - UI�v�̃E�B���h�E��
+echo        �G���[���o�Ă��Ȃ����m�F���Ă��������B
 echo.
 pause
 exit /b 1
 
 
-rem ==================== エラー処理 ====================
+rem ==================== error handlers ====================
 :no_venv
-echo [エラー] .venv がありません。
-echo         先に setup.bat をダブルクリックしてください。
+echo [�G���[] .venv ������܂���B
+echo         ��� setup.bat ���_�u���N���b�N���Ă��������B
 goto :fail
 
 :no_node_modules
-echo [エラー] frontend\node_modules がありません。
-echo         先に setup.bat をダブルクリックしてください。
+echo [�G���[] frontend\node_modules ������܂���B
+echo         ��� setup.bat ���_�u���N���b�N���Ă��������B
 goto :fail
 
 :no_deps
-echo [エラー] Python の依存が足りません。
-echo         setup.bat をもう一度実行してください。
+echo [�G���[] Python �̈ˑ�������܂���B
+echo         setup.bat ��������x���s���Ă��������B
 goto :fail
 
 :api_port_busy
-echo [エラー] ポート %PORT_API% は使用中です。
+echo [�G���[] �|�[�g %PORT_API% �͎g�p���ł��B
 echo.
-echo   前回の「Photo Shadow Art - API」のウィンドウが残っていませんか。
-echo   残っていれば閉じてから、もう一度 start.bat を実行してください。
+echo   �O��́uPhoto Shadow Art - API�v�̃E�B���h�E��
+echo   �c���Ă��܂��񂩁B���Ă��������x���s���Ă��������B
 goto :fail
 
 :ui_port_busy
-echo [エラー] ポート %PORT_UI% は使用中です。
+echo [�G���[] �|�[�g %PORT_UI% �͎g�p���ł��B
 echo.
-echo   前回の「Photo Shadow Art - UI」のウィンドウが残っていませんか。
-echo   残っていれば閉じてから、もう一度 start.bat を実行してください。
+echo   �O��́uPhoto Shadow Art - UI�v�̃E�B���h�E��
+echo   �c���Ă��܂��񂩁B���Ă��������x���s���Ă��������B
 goto :fail
 
 :fail

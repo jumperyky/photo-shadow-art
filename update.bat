@@ -1,34 +1,37 @@
 @echo off
-chcp 65001 >nul
 setlocal
 cd /d "%~dp0"
 
 rem ============================================================
-rem  Photo Shadow Art - æœ€æ–°ç‰ˆã«æ›´æ–° (Windows)
+rem  Photo Shadow Art - update to the latest version on Windows
 rem
-rem    update.bat  â€¦ git pull ã—ã¦ã‹ã‚‰ä¾å­˜ã‚’å…¥ã‚Œç›´ã™
+rem    update.bat  : git pull, then reinstall dependencies
 rem
-rem  ä¾å­˜(node_modules / .venv)ã¯ç«¯æœ«ã”ã¨ã«ä½œã‚‹ã‚‚ã®ãªã®ã§ã€
-rem  ã‚½ãƒ¼ã‚¹ã‚’æ›´æ–°ã—ãŸã‚‰ã“ã‚Œã‚’å®Ÿè¡Œã—ã¦ãŠãã¨ç¢ºå®Ÿã€‚
+rem  node_modules and .venv are built per machine, so refreshing
+rem  them after pulling new source keeps things consistent.
+rem
+rem  NOTE on encoding: saved in CP932, must NOT call chcp 65001.
+rem  See the comment in setup.bat for the reason.
 rem ============================================================
 
 echo.
 echo ============================================
-echo   Photo Shadow Art æ›´æ–°
+echo   Photo Shadow Art XV
 echo ============================================
 echo.
 
 where git >nul 2>&1
 if errorlevel 1 goto :no_git
 
-rem --- æœªã‚³ãƒŸãƒƒãƒˆã®å¤‰æ›´ãŒã‚ã‚Œã°æ­¢ã‚ã‚‹ -------------------------
+rem --- refuse to pull over uncommitted work -------------------
 git diff --quiet
 if errorlevel 1 goto :dirty
 git diff --cached --quiet
 if errorlevel 1 goto :dirty
 
+set "BRANCH="
 for /f "delims=" %%b in ('git rev-parse --abbrev-ref HEAD') do set "BRANCH=%%b"
-echo ç¾åœ¨ã®ãƒ–ãƒ©ãƒ³ãƒ: %BRANCH%
+echo Œ»İ‚Ìƒuƒ‰ƒ“ƒ`: %BRANCH%
 echo.
 
 echo --- git pull ---
@@ -36,29 +39,29 @@ git pull origin %BRANCH%
 if errorlevel 1 goto :pull_failed
 
 echo.
-echo --- ä¾å­˜ã‚’æ›´æ–°ã—ã¾ã™ ---
+echo --- ˆË‘¶‚ğXV‚µ‚Ü‚· ---
 call "%~dp0setup.bat"
 exit /b %errorlevel%
 
 
-rem ==================== ã‚¨ãƒ©ãƒ¼å‡¦ç† ====================
+rem ==================== error handlers ====================
 :no_git
-echo [ã‚¨ãƒ©ãƒ¼] git ãŒè¦‹ã¤ã‹ã‚Šã¾ã›ã‚“ã€‚
+echo [ƒGƒ‰[] git ‚ªŒ©‚Â‚©‚è‚Ü‚¹‚ñB
 echo         https://git-scm.com/download/win
 goto :fail
 
 :dirty
-echo [ä¸­æ­¢] ã‚³ãƒŸãƒƒãƒˆã—ã¦ã„ãªã„å¤‰æ›´ãŒã‚ã‚Šã¾ã™ã€‚
+echo [’†~] ƒRƒ~ƒbƒg‚µ‚Ä‚¢‚È‚¢•ÏX‚ª‚ ‚è‚Ü‚·B
 echo.
-echo   å…ˆã«å¤‰æ›´ã‚’é€€é¿ã™ã‚‹ã‹ã‚³ãƒŸãƒƒãƒˆã—ã¦ãã ã•ã„ã€‚
-echo   é€€é¿ã™ã‚‹å ´åˆ:  git stash
+echo   æ‚É•ÏX‚ğ‘Ş”ğ‚·‚é‚©ƒRƒ~ƒbƒg‚µ‚Ä‚­‚¾‚³‚¢B
+echo   ‘Ş”ğ‚·‚éê‡‚Í  git stash  ‚ğÀs‚µ‚Ü‚·B
 echo.
 git status --short
 goto :fail
 
 :pull_failed
-echo [ã‚¨ãƒ©ãƒ¼] git pull ã«å¤±æ•—ã—ã¾ã—ãŸã€‚
-echo         ä¸Šã«å‡ºã¦ã„ã‚‹ãƒ¡ãƒƒã‚»ãƒ¼ã‚¸ã‚’ç¢ºèªã—ã¦ãã ã•ã„ã€‚
+echo [ƒGƒ‰[] git pull ‚É¸”s‚µ‚Ü‚µ‚½B
+echo         ã‚Éo‚Ä‚¢‚éƒƒbƒZ[ƒW‚ğŠm”F‚µ‚Ä‚­‚¾‚³‚¢B
 goto :fail
 
 :fail

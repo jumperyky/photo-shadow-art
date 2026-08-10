@@ -1,28 +1,33 @@
 @echo off
-chcp 65001 >nul
 setlocal
 cd /d "%~dp0"
 
 rem ============================================================
-rem  Photo Shadow Art - 初回セットアップ (Windows)
+rem  Photo Shadow Art - first time setup for Windows
 rem
-rem    setup.bat  … .venv を作って Python / npm の依存を入れる
+rem    setup.bat  : create .venv, install Python and npm deps
 rem
-rem  完了後は start.bat で起動できる。
-rem  git pull で更新したあとにもう一度実行すると依存を入れ直せる。
+rem  Run start.bat afterwards.
+rem  Run this again after a git pull to refresh dependencies.
 rem
-rem  注意: for /f の in(...) の中や if(...) ブロックの中では
-rem  丸カッコと > が cmd のパーサーに食われるため、
-rem  Python のワンライナーはそれらの外に置いている。
+rem  NOTE on encoding: this file is saved in CP932 and must NOT
+rem  call "chcp 65001". Switching cmd.exe to UTF-8 makes it lose
+rem  track of its byte offset inside a batch file that contains
+rem  multi byte characters, and it starts executing the middle of
+rem  comment lines. Keep comments ASCII, messages CP932.
+rem
+rem  NOTE on the parser: cmd eats round brackets and redirect signs
+rem  inside for /f and if blocks, so the Python one liners stay
+rem  outside them and every branch is written with goto.
 rem ============================================================
 
 echo.
 echo ============================================
-echo   Photo Shadow Art セットアップ
+echo   Photo Shadow Art �Z�b�g�A�b�v
 echo ============================================
 echo.
 
-rem --- Python を探す (python → py -3 の順) --------------------
+rem --- locate Python: try "python" then "py -3" ---------------
 set "PY="
 python --version >nul 2>&1 && set "PY=python"
 if defined PY goto :py_found
@@ -31,97 +36,97 @@ if defined PY goto :py_found
 goto :no_python
 :py_found
 
-rem --- バージョン確認 (3.10 以上) -----------------------------
+rem --- require 3.10 or newer ----------------------------------
 %PY% -c "import sys; sys.exit(0 if sys.version_info >= (3,10) else 1)"
 if errorlevel 1 goto :old_python
 
 set "PYVER=?"
 for /f "tokens=2" %%v in ('%PY% --version 2^>^&1') do set "PYVER=%%v"
-echo [1/5] Python %PYVER% を使います
+echo [1/5] Python %PYVER% ���g���܂�
 
-rem --- 仮想環境 -----------------------------------------------
+rem --- virtual environment ------------------------------------
 if exist ".venv\Scripts\python.exe" goto :venv_ready
-echo [2/5] 仮想環境 .venv を作成しています...
+echo [2/5] ���z�� .venv ���쐬���Ă��܂�...
 %PY% -m venv .venv
 if errorlevel 1 goto :venv_failed
 goto :venv_done
 :venv_ready
-echo [2/5] 既存の .venv を使います
+echo [2/5] ������ .venv ���g���܂�
 :venv_done
 
 set "PYEXE=%~dp0.venv\Scripts\python.exe"
 
-rem --- Python の依存 ------------------------------------------
-echo [3/5] Python の依存をインストールしています（数分かかります）...
+rem --- Python dependencies ------------------------------------
+echo [3/5] Python �̈ˑ����C���X�g�[�����Ă��܂��B����������܂�...
 "%PYEXE%" -m pip install --upgrade pip --quiet
 "%PYEXE%" -m pip install -r backend\requirements.txt --quiet
 if errorlevel 1 goto :pip_failed
 
-rem --- Node の確認 --------------------------------------------
+rem --- Node ---------------------------------------------------
 where npm >nul 2>&1
 if errorlevel 1 goto :no_npm
 
-rem --- フロントエンドの依存 -----------------------------------
-echo [4/5] フロントエンドの依存をインストールしています...
+rem --- frontend dependencies ----------------------------------
+echo [4/5] �t�����g�G���h�̈ˑ����C���X�g�[�����Ă��܂�...
 pushd frontend
 call npm install --no-audit --no-fund --loglevel=error
 if errorlevel 1 goto :npm_failed_pop
 popd
 
-rem --- 動作確認 -----------------------------------------------
-echo [5/5] 動作確認をしています...
+rem --- smoke test ---------------------------------------------
+echo [5/5] ����m�F�����Ă��܂�...
 "%PYEXE%" -c "import fastapi, uvicorn, shapely, trimesh, mapbox_earcut"
 if errorlevel 1 goto :verify_failed
 
 echo.
 echo ============================================
-echo   セットアップ完了
+echo   �Z�b�g�A�b�v����
 echo.
-echo   start.bat をダブルクリックすると起動します
+echo   start.bat ���_�u���N���b�N����ƋN�����܂�
 echo ============================================
 echo.
 pause
 exit /b 0
 
 
-rem ==================== エラー処理 ====================
+rem ==================== error handlers ====================
 :no_python
-echo [エラー] Python が見つかりません。
+echo [�G���[] Python ��������܂���B
 echo.
-echo   Python 3.10 以上をインストールし、インストーラの
-echo   「Add python.exe to PATH」にチェックを入れてください。
+echo   Python 3.10 �ȏ���C���X�g�[�����A�C���X�g�[����
+echo   �uAdd python.exe to PATH�v�Ƀ`�F�b�N�����Ă��������B
 echo   https://www.python.org/downloads/windows/
 goto :fail
 
 :old_python
-echo [エラー] Python 3.10 以上が必要です。今の Python は:
+echo [�G���[] Python 3.10 �ȏオ�K�v�ł��B���� Python ��:
 %PY% --version
 goto :fail
 
 :venv_failed
-echo [エラー] 仮想環境 .venv の作成に失敗しました。
+echo [�G���[] ���z�� .venv �̍쐬�Ɏ��s���܂����B
 goto :fail
 
 :pip_failed
-echo [エラー] Python の依存のインストールに失敗しました。
-echo         上に出ているメッセージを確認してください。
+echo [�G���[] Python �̈ˑ��̃C���X�g�[���Ɏ��s���܂����B
+echo         ��ɏo�Ă��郁�b�Z�[�W���m�F���Ă��������B
 goto :fail
 
 :no_npm
-echo [エラー] npm が見つかりません。
+echo [�G���[] npm ��������܂���B
 echo.
-echo   Node.js 20 以上をインストールしてください。
+echo   Node.js 20 �ȏ���C���X�g�[�����Ă��������B
 echo   https://nodejs.org/
 goto :fail
 
 :npm_failed_pop
 popd
-echo [エラー] npm install に失敗しました。
+echo [�G���[] npm install �Ɏ��s���܂����B
 goto :fail
 
 :verify_failed
-echo [エラー] 依存は入りましたが読み込みに失敗しました。
-echo         上に出ているメッセージを確認してください。
+echo [�G���[] �ˑ��͓���܂������ǂݍ��݂Ɏ��s���܂����B
+echo         ��ɏo�Ă��郁�b�Z�[�W���m�F���Ă��������B
 goto :fail
 
 :fail
