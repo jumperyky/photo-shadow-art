@@ -27,18 +27,21 @@ echo   Photo Shadow Art セットアップ
 echo ============================================
 echo.
 
-rem --- locate Python: try "python" then "py -3" ---------------
+rem --- find a Python that is 3.10 or newer --------------------
+rem  Check the version as part of the search, not after it. On Windows
+rem  "python" often resolves to an old Microsoft Store build while a newer
+rem  one is installed and reachable through the py launcher, so stopping at
+rem  the first interpreter found would reject a machine that is actually fine.
 set "PY="
-python --version >nul 2>&1 && set "PY=python"
-if defined PY goto :py_found
-py -3 --version >nul 2>&1 && set "PY=py -3"
-if defined PY goto :py_found
-goto :no_python
-:py_found
-
-rem --- require 3.10 or newer ----------------------------------
-%PY% -c "import sys; sys.exit(0 if sys.version_info >= (3,10) else 1)"
-if errorlevel 1 goto :old_python
+call :pick_python "python"
+call :pick_python "py -3"
+call :pick_python "py -3.14"
+call :pick_python "py -3.13"
+call :pick_python "py -3.12"
+call :pick_python "py -3.11"
+call :pick_python "py -3.10"
+call :pick_python "python3"
+if not defined PY goto :no_python
 
 set "PYVER=?"
 for /f "tokens=2" %%v in ('%PY% --version 2^>^&1') do set "PYVER=%%v"
@@ -91,16 +94,17 @@ exit /b 0
 
 rem ==================== error handlers ====================
 :no_python
-echo [エラー] Python が見つかりません。
+echo [エラー] Python 3.10 以上が見つかりません。
 echo.
-echo   Python 3.10 以上をインストールし、インストーラの
+echo   入っている Python の一覧:
+py -0 2>nul || echo     (py ランチャーも見つかりません)
+echo.
+echo   Python 3.12 前後をインストールし、インストーラの
 echo   「Add python.exe to PATH」にチェックを入れてください。
 echo   https://www.python.org/downloads/windows/
-goto :fail
-
-:old_python
-echo [エラー] Python 3.10 以上が必要です。今の Python は:
-%PY% --version
+echo.
+echo   （3.10 以上が必要なのは shapely が 3.9 向けの配布を
+echo    やめているためです）
 goto :fail
 
 :venv_failed
@@ -133,3 +137,15 @@ goto :fail
 echo.
 pause
 exit /b 1
+
+
+rem --- subroutine: adopt %1 as PY if it exists and is 3.10+ ---
+rem  Called with the interpreter command in quotes, e.g. "py -3.13".
+rem  Leaves PY untouched when the candidate is missing or too old, so the
+rem  caller can just try every candidate in order.
+:pick_python
+if defined PY exit /b 0
+%~1 -c "import sys; sys.exit(0 if sys.version_info >= (3,10) else 1)" >nul 2>&1
+if errorlevel 1 exit /b 0
+set "PY=%~1"
+exit /b 0

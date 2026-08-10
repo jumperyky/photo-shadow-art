@@ -125,6 +125,12 @@ photo-shadow-art/
 どちらもインストール時に PATH に通しておくこと
 (Windowsの Python インストーラなら「Add python.exe to PATH」にチェック)。
 
+> Python 3.10 以上が要るのは shapely が 3.9 向けの配布をやめているため。
+> `setup.bat` は `python` だけでなく py ランチャー(`py -3.13` 等)も順に試し、
+> **3.10 以上のものを探し当てる**。Windows では `python` が
+> Microsoft Store 版の古いビルドを指していても、別に新しいものが入っていれば
+> そちらを使う。入っている一覧は `py -0` で確認できる。
+
 **Windows** — エクスプローラーからダブルクリックするだけ。
 
 | ファイル | 用途 |
