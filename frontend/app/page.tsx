@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Message, Panel } from "@/components/Controls";
 import { CropStage } from "@/components/CropStage";
 import { Dropzone } from "@/components/Dropzone";
+import { KeychainParamPanel } from "@/components/KeychainParamPanel";
 import { LithophaneParamPanel } from "@/components/LithophaneParamPanel";
 import { ModeSelector } from "@/components/ModeSelector";
 import { ParamPanel } from "@/components/ParamPanel";
@@ -24,6 +25,7 @@ import {
 } from "@/lib/api";
 import {
   DEFAULT_FILAMENT,
+  DEFAULT_KEYCHAIN,
   DEFAULT_LITHOPHANE,
   DEFAULT_SHADOW_ART,
   MODE_LABELS,
@@ -35,6 +37,7 @@ import type { MeshData } from "@/lib/mesh";
 import type {
   AppConfig,
   CropBox,
+  KeychainParams,
   LithophaneParams,
   Mode,
   ModeInfo,
@@ -64,6 +67,12 @@ const FALLBACK_MODES: ModeInfo[] = [
     description: "厚みで濃淡を表現します。裏から光を当てて見ます。",
     defaults: {},
   },
+  {
+    id: "keychain",
+    label: "キーホルダー",
+    description: "枠付きの小さなリソフェイン。レジンで固めて持ち運べます。",
+    defaults: {},
+  },
 ];
 
 export default function Page() {
@@ -74,6 +83,7 @@ export default function Page() {
   // 方式ごとにパラメータを保持する。切り替えても調整内容が失われない。
   const [shadowParams, setShadowParams] = useState<ShadowArtParams>(DEFAULT_SHADOW_ART);
   const [lithoParams, setLithoParams] = useState<LithophaneParams>(DEFAULT_LITHOPHANE);
+  const [keychainParams, setKeychainParams] = useState<KeychainParams>(DEFAULT_KEYCHAIN);
   const [crop, setCrop] = useState<CropBox | null>(null);
 
   const [preview, setPreview] = useState<PreviewResponse | null>(null);
@@ -104,14 +114,22 @@ export default function Page() {
   const [canPickSaveLocation, setCanPickSaveLocation] = useState(false);
 
   const litho = mode === "lithophane";
-  const common = litho ? lithoParams : shadowParams;
-  const aspect = cropAspect(mode, shadowParams);
+  const keychain = mode === "keychain";
+  const common = litho ? lithoParams : keychain ? keychainParams : shadowParams;
+  // 外形を持つモード(シャドウアート・キーホルダー)は形状パラメータを共有する
+  const shapeSource = keychain ? keychainParams : shadowParams;
+  const aspect = cropAspect(mode, shapeSource);
   // 形状が変わったときだけ作り直す。毎レンダーで新しい配列を返すと
   // ReactCrop(PureComponent)が描き直され、ドラッグが重くなる。
   const outline = useMemo(
-    () => cropOutline(mode, shadowParams),
+    () => cropOutline(mode, shapeSource),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [mode, shadowParams.shape, shadowParams.sides],
+    [mode, shapeSource.shape, shapeSource.sides, shapeSource.aspect],
+  );
+  // API に渡すパラメータ束。参照が変わるとプレビューを取り直すので useMemo で固定する。
+  const modeParams = useMemo(
+    () => ({ shadow: shadowParams, litho: lithoParams, keychain: keychainParams }),
+    [shadowParams, lithoParams, keychainParams],
   );
   const abortRef = useRef<AbortController | null>(null);
   const meshAbortRef = useRef<AbortController | null>(null);
@@ -135,6 +153,9 @@ export default function Page() {
   }, []);
   const patchLitho = useCallback((p: Partial<LithophaneParams>) => {
     setLithoParams((prev) => ({ ...prev, ...p }));
+  }, []);
+  const patchKeychain = useCallback((p: Partial<KeychainParams>) => {
+    setKeychainParams((prev) => ({ ...prev, ...p }));
   }, []);
 
   // -------------------------------------------------------------- 顔検出
@@ -226,7 +247,7 @@ export default function Page() {
       setPreviewBusy(true);
 
       fetchPreview(
-        mode, image.image_id, shadowParams, lithoParams, crop, 760, filament, ac.signal)
+        mode, image.image_id, modeParams, crop, 760, filament, ac.signal)
         .then((res) => {
           setPreview(res);
           setPreviewError(null);
@@ -241,7 +262,7 @@ export default function Page() {
     }, PREVIEW_DEBOUNCE_MS);
 
     return () => clearTimeout(timer);
-  }, [mode, image, shadowParams, lithoParams, crop, filament]);
+  }, [mode, image, modeParams, crop, filament]);
 
   useEffect(() => () => abortRef.current?.abort(), []);
 
@@ -256,7 +277,7 @@ export default function Page() {
       meshAbortRef.current = ac;
       setMeshBusy(true);
 
-      fetchMesh(mode, image.image_id, shadowParams, lithoParams, crop, "medium", ac.signal)
+      fetchMesh(mode, image.image_id, modeParams, crop, "medium", ac.signal)
         .then((res) => {
           setMesh(res);
           setMeshError(null);
@@ -271,7 +292,7 @@ export default function Page() {
     }, MESH_DEBOUNCE_MS);
 
     return () => clearTimeout(timer);
-  }, [view, mode, image, shadowParams, lithoParams, crop]);
+  }, [view, mode, image, modeParams, crop]);
 
   useEffect(() => () => meshAbortRef.current?.abort(), []);
 
@@ -307,8 +328,7 @@ export default function Page() {
       const { blob, filename: name } = await fetchStl(
         mode,
         image.image_id,
-        shadowParams,
-        lithoParams,
+        modeParams,
         crop,
         filename,
         quality,
@@ -504,7 +524,22 @@ export default function Page() {
         {/* ---------------------------------------- 5. パラメータ */}
         <div className="col col-params">
           <Panel title={`パラメータ（${MODE_LABELS[mode]}）`} flush>
-            {litho ? (
+            {keychain ? (
+              <KeychainParamPanel
+                params={keychainParams}
+                onChange={patchKeychain}
+                onReset={() => setKeychainParams(DEFAULT_KEYCHAIN)}
+                size={preview?.size ?? null}
+                faceAvailable={faceAvailable}
+                faceBusy={faceBusy}
+                faceMessage={faceMessage}
+                onDetectFace={() => {
+                  if (image) {
+                    void runFaceDetect(image.image_id, faceAspect, keychainParams.face_margin);
+                  }
+                }}
+              />
+            ) : litho ? (
               <LithophaneParamPanel
                 params={lithoParams}
                 onChange={patchLitho}
@@ -544,6 +579,7 @@ export default function Page() {
 const MODE_SUFFIX: Record<Mode, string> = {
   shadow_art: "-shadow-art",
   lithophane: "-lithophane",
+  keychain: "-keychain",
 };
 
 /** アップロードしたファイル名からSTLのファイル名候補を作る */

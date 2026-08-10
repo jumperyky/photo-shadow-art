@@ -37,6 +37,9 @@ export function PreviewStage({
   const size = preview?.size;
   const overLimit = size ? !size.within_print_limit : false;
   const litho = mode === "lithophane";
+  const keychain = mode === "keychain";
+  // 裏から照らして見るモードは2Dタブが「光の見え方」になる
+  const backlit = litho || keychain;
   const is3d = view === "3d";
 
   return (
@@ -49,7 +52,7 @@ export function PreviewStage({
             aria-selected={!is3d}
             onClick={() => onViewChange("2d")}
           >
-            {litho ? "2D（光の見え方）" : "2D（形状）"}
+            {backlit ? "2D（光の見え方）" : "2D（形状）"}
           </button>
           <button
             type="button"
@@ -78,7 +81,7 @@ export function PreviewStage({
             <img
               src={preview.image}
               alt={
-                litho
+                backlit
                   ? "裏から光を当てたときの見え方のプレビュー"
                   : "生成される形状のプレビュー"
               }
@@ -105,6 +108,10 @@ export function PreviewStage({
             {`プリントベッドに置いた状態で表示しています。表示用に粗くした${mesh.triangleCount.toLocaleString()}三角形のモデルなので、実際の出力はこれより滑らかです。`}
           </p>
         ) : null
+      ) : keychain && preview ? (
+        <p className="muted preview-caption">
+          裏から光を当てたときの見え方です。枠の内側にレジンを流して固めます。
+        </p>
       ) : litho && preview ? (
         <p className="muted preview-caption">
           裏から光を当てたときの見え方をシミュレートしています。
@@ -123,7 +130,43 @@ export function PreviewStage({
             </b>
           </span>
 
-          {litho ? (
+          {keychain ? (
+            <>
+              <span className="chip">
+                デザイン部
+                <b>
+                  {fmt(size.design_width_mm)} × {fmt(size.design_height_mm)} mm
+                </b>
+              </span>
+              <span className="chip">
+                厚み
+                <b>
+                  {size.min_thickness_mm?.toFixed(2)}–
+                  {size.max_thickness_mm?.toFixed(2)} mm
+                </b>
+              </span>
+              {size.well_depth_mm ? (
+                <span className="chip">
+                  レジンだまり<b>{size.well_depth_mm.toFixed(2)} mm</b>
+                </span>
+              ) : null}
+              {size.resin_volume_ml ? (
+                <span className="chip">
+                  レジン量<b>約 {size.resin_volume_ml.toFixed(1)} ml</b>
+                </span>
+              ) : null}
+              {size.hole_diameter_mm ? (
+                <span className="chip">
+                  穴径<b>{size.hole_diameter_mm.toFixed(1)} mm</b>
+                </span>
+              ) : null}
+              {size.face_count ? (
+                <span className="chip">
+                  三角形<b>約 {(size.face_count / 1000).toFixed(0)}k</b>
+                </span>
+              ) : null}
+            </>
+          ) : litho ? (
             <>
               <span className="chip">
                 厚み

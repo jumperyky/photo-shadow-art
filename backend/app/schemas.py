@@ -17,7 +17,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 from photo_common import MAX_PRINT_SIZE_MM
 
-Mode = Literal["shadow_art", "lithophane"]
+Mode = Literal["shadow_art", "lithophane", "keychain"]
 ShapeName = Literal["square", "rectangle", "circle", "hexagon"]
 
 _HEX_COLOR = re.compile(r"^#[0-9a-fA-F]{6}$")
@@ -125,6 +125,58 @@ class LithophaneParams(CommonParams):
 
 
 # ---------------------------------------------------------------------------
+# キーホルダー(形状クリップしたリソフェイン + 枠 + リング穴)
+# ---------------------------------------------------------------------------
+class KeychainParams(CommonParams):
+    """
+    ShadowArtParams を継承しないこと。main.py は isinstance で分岐しており、
+    サブクラスにすると黙ってシャドウアート側に流れてしまう。
+    """
+    mode: Literal["keychain"] = "keychain"
+
+    shape: ShapeName = "circle"
+    sides: Optional[int] = Field(default=None, ge=3, le=64)
+    aspect: float = Field(default=1.0, gt=0.05, le=20.0)
+
+    diameter: float = Field(default=50.0, gt=0.0, le=MAX_PRINT_SIZE_MM)
+    frame_width: float = Field(default=3.0, ge=0.0, le=200.0)
+    min_thickness: float = Field(default=0.6, gt=0.0, le=100.0)
+    max_thickness: float = Field(default=2.4, gt=0.0, le=200.0)
+    # 枠厚は max_thickness + well_depth で決まる。枠厚を直接指定させないことで、
+    # 「枠が凹凸より低くレジンが溜まらない」設定をUIから作れなくしている。
+    well_depth: float = Field(default=0.6, gt=0.0, le=50.0)
+    hole_diameter: float = Field(default=3.5, gt=0.0, le=50.0)
+    ring_margin: float = Field(default=2.5, gt=0.0, le=50.0)
+    samples: int = Field(default=320, ge=8, le=800)
+
+    # リソフェインと同じく暗部の階調を出すため1未満が定番
+    gamma: float = Field(default=0.8, gt=0.0, le=5.0)
+    positive: bool = False
+
+    @field_validator("shape", mode="before")
+    @classmethod
+    def _normalize_shape(cls, v):
+        return v.lower() if isinstance(v, str) else v
+
+    @model_validator(mode="after")
+    def _check_thickness(self):
+        if self.max_thickness < self.min_thickness:
+            raise ValueError("最大厚みは最小厚み以上にしてください。")
+        return self
+
+    @property
+    def effective_aspect(self) -> float:
+        """円/多角形は常に等方なので aspect は 1 として扱う"""
+        if self.sides is not None:
+            return 1.0
+        return self.aspect if self.shape in ("square", "rectangle") else 1.0
+
+    @property
+    def effective_shape(self):
+        return self.sides if self.sides is not None else self.shape
+
+
+# ---------------------------------------------------------------------------
 # リクエスト
 # ---------------------------------------------------------------------------
 class PreviewOptions(BaseModel):
@@ -150,6 +202,10 @@ class LithophanePreviewRequest(LithophaneParams, PreviewOptions):
     pass
 
 
+class KeychainPreviewRequest(KeychainParams, PreviewOptions):
+    pass
+
+
 class MeshOptions(BaseModel):
     """3Dプレビュー用。STLより粗いメッシュをブラウザに渡す。"""
     # 転送量と生成時間を抑えるための解像度。UIからは変えない想定だが、
@@ -165,7 +221,12 @@ class LithophaneMeshRequest(LithophaneParams, MeshOptions):
     pass
 
 
-AnyMeshRequest = Union[ShadowArtMeshRequest, LithophaneMeshRequest]
+class KeychainMeshRequest(KeychainParams, MeshOptions):
+    pass
+
+
+AnyMeshRequest = Union[ShadowArtMeshRequest, LithophaneMeshRequest,
+                       KeychainMeshRequest]
 
 
 class ExportOptions(BaseModel):
@@ -181,8 +242,14 @@ class LithophaneStlRequest(LithophaneParams, ExportOptions):
     pass
 
 
-AnyPreviewRequest = Union[ShadowArtPreviewRequest, LithophanePreviewRequest]
-AnyStlRequest = Union[ShadowArtStlRequest, LithophaneStlRequest]
+class KeychainStlRequest(KeychainParams, ExportOptions):
+    pass
+
+
+AnyPreviewRequest = Union[ShadowArtPreviewRequest, LithophanePreviewRequest,
+                          KeychainPreviewRequest]
+AnyStlRequest = Union[ShadowArtStlRequest, LithophaneStlRequest,
+                      KeychainStlRequest]
 
 
 # ---------------------------------------------------------------------------
@@ -207,6 +274,13 @@ class SizeInfo(BaseModel):
     grid: Optional[str] = None          # "400 x 533"
     face_count: Optional[int] = None
     radius_mm: Optional[float] = None   # 湾曲時の内側半径
+
+    # キーホルダー専用
+    frame_thickness_mm: Optional[float] = None   # 枠の高さ(=最大厚み+レジンだまり)
+    well_depth_mm: Optional[float] = None        # レジンだまりの深さ
+    hole_diameter_mm: Optional[float] = None
+    resin_volume_ml: Optional[float] = None      # 必要なレジンの量の目安
+    relief_px: Optional[int] = None              # デザイン部の実効解像度(格子の列数)
 
 
 class PreviewResponse(BaseModel):

@@ -1,10 +1,12 @@
 import type {
   CropBox,
+  KeychainParams,
   CropOutline,
   LithophaneParams,
   Mode,
   ShadowArtParams,
   ShapeName,
+  ShapeParams,
 } from "./types";
 
 export const DEFAULT_SHADOW_ART: ShadowArtParams = {
@@ -33,6 +35,26 @@ export const DEFAULT_LITHOPHANE: LithophaneParams = {
   samples: 400,
   curve: 0,
   // リソフェインは暗部の階調を出すため1未満が定番
+  gamma: 0.8,
+  positive: false,
+  equalize: false,
+  auto_face: false,
+  face_margin: 0.6,
+};
+
+/** backend/app/main.py の KEYCHAIN_DEFAULTS と一致させること */
+export const DEFAULT_KEYCHAIN: KeychainParams = {
+  shape: "circle",
+  sides: null,
+  aspect: 1.0,
+  diameter: 50,
+  frame_width: 3.0,
+  min_thickness: 0.6,
+  max_thickness: 2.4,
+  well_depth: 0.6,
+  hole_diameter: 3.5,
+  ring_margin: 2.5,
+  samples: 320,
   gamma: 0.8,
   positive: false,
   equalize: false,
@@ -82,6 +104,7 @@ export function isLightFilament(hex: string): boolean {
 export const MODE_LABELS: Record<Mode, string> = {
   shadow_art: "シャドウアート",
   lithophane: "リソフェイン",
+  keychain: "キーホルダー",
 };
 
 export const SHAPE_LABELS: Record<ShapeName, string> = {
@@ -101,8 +124,9 @@ export const SHAPE_LABELS: Record<ShapeName, string> = {
  */
 export function cropAspect(
   mode: Mode,
-  params: ShadowArtParams,
+  params: ShapeParams,
 ): number | undefined {
+  // 外形を持たないのはリソフェインだけ(板の比率がクロップでそのまま決まる)
   if (mode === "lithophane") return undefined;
   if (params.sides !== null) return 1;
   if (params.shape === "rectangle") return 1 / params.aspect;
@@ -123,7 +147,7 @@ export function cropAspect(
  */
 export function cropOutline(
   mode: Mode,
-  params: ShadowArtParams,
+  params: ShapeParams,
 ): CropOutline {
   if (mode === "lithophane") return null;
 

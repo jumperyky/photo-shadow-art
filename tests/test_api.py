@@ -239,10 +239,10 @@ def test_stl_filename_is_sanitized():
 # ---------------------------------------------------------------------------
 # リソフェイン
 # ---------------------------------------------------------------------------
-def test_config_lists_both_modes():
+def test_config_lists_all_modes():
     cfg = client.get("/api/config").json()
     ids = [m["id"] for m in cfg["modes"]]
-    assert ids == ["shadow_art", "lithophane"]
+    assert ids == ["shadow_art", "lithophane", "keychain"]
     for m in cfg["modes"]:
         assert m["label"] and m["description"] and m["defaults"]
 
@@ -644,6 +644,108 @@ def test_mesh_ignores_filament_color():
     assert res.status_code == 200, res.text
     plain = client.post("/api/mesh", json={"mode": "shadow_art", "image_id": image_id})
     assert res.content == plain.content
+
+
+# --------------------------------------------------------------- キーホルダー
+def _keychain_available():
+    import keychain_stl
+    return keychain_stl.boolean_available()
+
+
+def test_keychain_preview():
+    """プレビューはブーリアンを通さないので、常に動くこと"""
+    image_id = upload()
+    res = client.post("/api/preview", json={
+        "mode": "keychain", "image_id": image_id, "shape": "hexagon",
+    })
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["mode"] == "keychain"
+    assert body["image"].startswith("data:image/png;base64,")
+    size = body["size"]
+    # キーホルダー専用のフィールドが埋まっていること
+    assert size["frame_thickness_mm"] == 3.0        # 最大厚み2.4 + だまり0.6
+    assert size["well_depth_mm"] == 0.6
+    assert size["hole_diameter_mm"] == 3.5
+    assert size["resin_volume_ml"] > 0
+    assert size["relief_px"] > 0
+
+
+def test_keychain_is_not_routed_to_shadow_art():
+    """
+    分岐の取り違え検出。/api/preview は shadow_art を if、/api/mesh と /api/stl は
+    lithophane を if にしていた名残があるので、新モードが黙って別モードとして
+    処理されないことを固定する。
+    """
+    image_id = upload()
+    for path, extra in (("/api/preview", {}),
+                        ("/api/mesh", {"mesh_detail": "low"}),
+                        ("/api/stl", {"quality": "draft"})):
+        if path != "/api/preview" and not _keychain_available():
+            continue
+        res = client.post(path, json={"mode": "keychain", "image_id": image_id, **extra})
+        assert res.status_code == 200, f"{path}: {res.text[:200]}"
+        if path == "/api/preview":
+            assert res.json()["mode"] == "keychain"
+        else:
+            assert res.headers.get("X-Mode") == "keychain", path
+
+
+def test_keychain_well_depth_must_be_positive():
+    """UIから『枠が凹凸より低い』設定を作れないこと"""
+    image_id = upload()
+    res = client.post("/api/preview", json={
+        "mode": "keychain", "image_id": image_id, "well_depth": 0,
+    })
+    assert res.status_code == 422
+
+
+def test_keychain_rejects_bad_params():
+    image_id = upload()
+    for bad in ({"max_thickness": 0.3, "min_thickness": 2.0},
+                {"ring_margin": 0},
+                {"hole_diameter": 0},
+                {"samples": 5}):
+        res = client.post("/api/preview", json={
+            "mode": "keychain", "image_id": image_id, **bad})
+        assert res.status_code == 422, f"{bad} -> {res.status_code}"
+
+
+def test_keychain_small_size_warns():
+    image_id = upload()
+    res = client.post("/api/preview", json={
+        "mode": "keychain", "image_id": image_id, "shape": "square",
+        "diameter": 30,
+    })
+    assert any("解像度" in w for w in res.json()["warnings"])
+
+
+def test_keychain_mesh_and_stl():
+    if not _keychain_available():
+        return
+    image_id = upload()
+    res = client.post("/api/mesh", json={
+        "mode": "keychain", "image_id": image_id, "mesh_detail": "low"})
+    assert res.status_code == 200, res.text
+    pos, _idx = _decode_mesh(res.content)
+    lo, hi = pos.min(axis=0), pos.max(axis=0)
+    # 他モードと同じくXY中心・Z底面0で返ること
+    assert abs(lo[0] + hi[0]) < 1e-3 and abs(lo[1] + hi[1]) < 1e-3
+    assert abs(lo[2]) < 1e-4
+
+    res = client.post("/api/stl", json={
+        "mode": "keychain", "image_id": image_id, "quality": "draft"})
+    assert res.status_code == 200, res.text
+    assert b"keychain" in res.headers["Content-Disposition"].encode()
+
+
+def test_keychain_color_does_not_change_geometry():
+    image_id = upload()
+    base = {"mode": "keychain", "image_id": image_id}
+    a = client.post("/api/preview", json={**base, "filament_color": "#141414"}).json()
+    b = client.post("/api/preview", json={**base, "filament_color": "#2c6fb5"}).json()
+    assert a["size"] == b["size"]
+    assert a["image"] != b["image"]
 
 
 if __name__ == "__main__":

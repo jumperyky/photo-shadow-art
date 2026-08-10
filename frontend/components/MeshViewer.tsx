@@ -206,15 +206,16 @@ export function MeshViewer({
     const dist = (sphere.radius / Math.sin(fov / 2)) * 1.15;
 
     // 方式ごとの自然な見る向き(カメラを置く方向)。
-    //   シャドウアート: 寝た板(厚みは+Z)を斜め上から
-    //   リソフェイン  : 立った板を、起伏のある面の側から正面やや上に
+    //   シャドウアート          : 寝た板(厚みは+Z)を斜め上から
+    //   リソフェイン/キーホルダー: 立った板を、起伏のある面の側から正面やや上に
     //
-    // リソフェインは裏面(なめらかな側)が -Y、絵柄のある面が +Y を向いている。
+    // 立てて印刷するモードは裏面(なめらかな側)が -Y、絵柄のある面が +Y。
     // -Y 側から見ると真っ平らな板にしか見えないので、必ず +Y 側に置く。
+    // 「シャドウアートだけ別」と書いておけば、モードが増えても正しいままになる。
     const dir =
-      mode === "lithophane"
-        ? new THREE.Vector3(-0.3, 1, 0.3).normalize()
-        : new THREE.Vector3(0.35, -0.62, 0.75).normalize();
+      mode === "shadow_art"
+        ? new THREE.Vector3(0.35, -0.62, 0.75).normalize()
+        : new THREE.Vector3(-0.3, 1, 0.3).normalize();
 
     const target = sphere.center.clone();
     core.controls.target.copy(target);

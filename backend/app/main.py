@@ -47,6 +47,7 @@ if str(REPO_ROOT) not in sys.path:
 
 import line_art_stl as la  # noqa: E402
 import lithophane_stl as lp  # noqa: E402
+import keychain_stl as kcm  # noqa: E402
 import photo_common as pc  # noqa: E402
 
 from . import storage  # noqa: E402
@@ -62,6 +63,9 @@ from .schemas import (  # noqa: E402
     LithophaneMeshRequest,
     LithophanePreviewRequest,
     LithophaneStlRequest,
+    KeychainMeshRequest,
+    KeychainPreviewRequest,
+    KeychainStlRequest,
     ModeInfo,
     PreviewResponse,
     ShadowArtPreviewRequest,
@@ -96,6 +100,9 @@ LITHO_QUALITY_SCALE = {"draft": 0.5, "normal": 1.0, "fine": 1.5}
 # に収まり、生成も0.2秒以内。回転させながら調整できる程度の軽さを優先する。
 MESH_SHADOW_SAMPLES = {"low": 90, "medium": 140}
 MESH_LITHO_SAMPLES = {"low": 80, "medium": 120}
+# キーホルダーはブーリアンを通すぶん重いので、3Dプレビューは特に粗くする
+MESH_KEYCHAIN_SAMPLES = {"low": 80, "medium": 110}
+KEYCHAIN_QUALITY_SCALE = {"draft": 0.6, "normal": 1.0, "fine": 1.4}
 
 # --- プレビューの配色 -------------------------------------------------------
 # シャドウアートの2Dプレビューの背景。線と同化しないよう、フィラメントが
@@ -116,6 +123,14 @@ SHADOW_ART_DEFAULTS = {
     "thickness": 2.0, "frame_width": 8.0, "frame_thickness": 2.0,
     "gamma": 1.0, "invert": False, "equalize": False,
     "auto_face": False, "face_margin": 0.6,
+}
+
+KEYCHAIN_DEFAULTS = {
+    "shape": "circle", "sides": None, "aspect": 1.0, "diameter": 50.0,
+    "frame_width": 3.0, "min_thickness": 0.6, "max_thickness": 2.4,
+    "well_depth": 0.6, "hole_diameter": 3.5, "ring_margin": 2.5,
+    "samples": 320, "gamma": 0.8, "positive": False,
+    "equalize": False, "auto_face": False, "face_margin": 0.6,
 }
 
 LITHOPHANE_DEFAULTS = {
@@ -341,7 +356,8 @@ def _stl_response(mesh, req, size: SizeInfo) -> Response:
     if isinstance(stl_bytes, str):
         stl_bytes = stl_bytes.encode("utf-8")
 
-    fallback = "lithophane" if req.mode == "lithophane" else "shadow-art"
+    fallback = {"shadow_art": "shadow-art", "lithophane": "lithophane",
+                "keychain": "keychain"}.get(req.mode, "shadow-art")
     ascii_name = _safe_filename(req.filename, fallback)
     utf8_name = req.filename or fallback
     if not utf8_name.lower().endswith(".stl"):
@@ -397,6 +413,16 @@ def get_config():
                     "連続階調が出せるかわりに、必ず背面照明が必要です。"
                 ),
                 defaults=LITHOPHANE_DEFAULTS,
+            ),
+            ModeInfo(
+                id="keychain",
+                label="キーホルダー",
+                description=(
+                    "小さめのリソフェインを枠で囲み、上にリングを通す穴を付けます。"
+                    "枠が凹凸より高いので、透明レジンを流して固めると"
+                    "表面が平らになり持ち運べます。"
+                ),
+                defaults=KEYCHAIN_DEFAULTS,
             ),
         ],
         defaults=SHADOW_ART_DEFAULTS,
@@ -490,13 +516,63 @@ def _litho_tint(fg) -> tuple:
     return tuple(round(h * light / 255) for h, light in zip(hue, LITHO_LIGHT))
 
 
+def _build_keychain(params, image_path: Path, samples: int):
+    """キーホルダーを組む。クロップはシャドウアートと同じく形状に合わせる。"""
+    crop_box, notices = _resolve_crop(
+        params, image_path, params.effective_aspect, "中央クロップを使用します。")
+    try:
+        kc = kcm.build_keychain(
+            str(image_path),
+            shape=params.effective_shape,
+            diameter=params.diameter,
+            aspect=params.effective_aspect,
+            frame_width=params.frame_width,
+            min_thickness=params.min_thickness,
+            max_thickness=params.max_thickness,
+            well_depth=params.well_depth,
+            hole_diameter=params.hole_diameter,
+            ring_margin=params.ring_margin,
+            samples=samples,
+            gamma=params.gamma,
+            positive=params.positive,
+            equalize=params.equalize,
+            crop_box=crop_box,
+            auto_face=False,
+        )
+    except (ValueError, MemoryError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return kc, crop_box, notices
+
+
+def _keychain_size(kc) -> SizeInfo:
+    w, h, d = kc.footprint()
+    return SizeInfo(
+        outer_width_mm=round(w, 2),
+        outer_height_mm=round(h, 2),
+        outer_depth_mm=round(d, 2),
+        design_width_mm=round(kc.design_width, 2),
+        design_height_mm=round(kc.design_height, 2),
+        within_print_limit=max(w, h, d) <= pc.MAX_PRINT_SIZE_MM,
+        min_thickness_mm=round(kc.relief_min, 2),
+        max_thickness_mm=round(kc.relief_max, 2),
+        frame_thickness_mm=round(kc.frame_thickness, 2),
+        well_depth_mm=round(kc.well_depth, 2),
+        hole_diameter_mm=round(kc.body.hole_radius * 2, 2),
+        resin_volume_ml=round(kc.resin_volume_ml, 2),
+        relief_px=kc.relief_px,
+        face_count=kc.face_count_estimate,
+    )
+
+
 @app.post("/api/preview", response_model=PreviewResponse)
 def preview(req: AnyPreviewRequest = Body(..., discriminator="mode")):
     started = time.perf_counter()
     path = _resolve_image(req.image_id)
     filament = _hex_to_rgb(req.filament_color)
 
-    if isinstance(req, ShadowArtPreviewRequest):
+    # 3モードとも明示的に分岐する。if/else の落ち先に頼ると、モードを足したとき
+    # 黙って別モードとして処理されてしまう。
+    if req.mode == "shadow_art":
         art, crop_box, notices = _build_shadow_art(
             req, path, SHADOW_SAMPLES["preview"])
         image = la.render_preview_image(
@@ -504,6 +580,21 @@ def preview(req: AnyPreviewRequest = Body(..., discriminator="mode")):
             bg=_preview_backdrop(filament), fg=filament)
         warnings = art.warnings
         size = _shadow_art_size(art, req)
+    elif req.mode == "keychain":
+        # プレビューはブーリアンを通さない(2D描画だけ)ので軽い
+        kc, crop_box, notices = _build_keychain(
+            req, path, min(req.samples, req.preview_size))
+        image = kcm.render_preview_image(
+            kc, size=req.preview_size, tint=_litho_tint(filament),
+            frame_color=filament, bg=_preview_backdrop(filament))
+        warnings = kc.warnings
+        size = _keychain_size(kc)
+        if _luma(filament) < LITHO_DARK_LUMA:
+            notices.append(
+                "暗い色のフィラメントは光をほとんど通しません。"
+                "キーホルダーも裏から照らして見るものなので、"
+                "白や淡い色での出力をおすすめします。"
+            )
     else:
         # プレビューは分割数を抑えて高速に(見た目の階調は分割数に依存しない)
         samples = min(req.samples, req.preview_size)
@@ -563,7 +654,18 @@ def make_mesh(req: AnyMeshRequest = Body(..., discriminator="mode")):
     """
     path = _resolve_image(req.image_id)
 
-    if isinstance(req, LithophaneMeshRequest):
+    if req.mode == "keychain":
+        kc, _crop, _notices = _build_keychain(
+            req, path, MESH_KEYCHAIN_SAMPLES[req.mesh_detail])
+        try:
+            mesh = kcm.build_mesh(kc)
+        except kcm.BooleanUnavailable as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except (RuntimeError, MemoryError) as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        return _mesh_response(mesh, req, _keychain_size(kc))
+
+    if req.mode == "lithophane":
         # ユーザー指定の分割数より細かくしても意味がないので上限として使う
         samples = min(req.samples, MESH_LITHO_SAMPLES[req.mesh_detail])
         litho, _crop, _notices = _build_lithophane(req, path, samples)
@@ -588,7 +690,19 @@ def make_mesh(req: AnyMeshRequest = Body(..., discriminator="mode")):
 def make_stl(req: AnyStlRequest = Body(..., discriminator="mode")):
     path = _resolve_image(req.image_id)
 
-    if isinstance(req, LithophaneStlRequest):
+    if req.mode == "keychain":
+        scale = KEYCHAIN_QUALITY_SCALE[req.quality]
+        samples = int(max(8, min(800, round(req.samples * scale))))
+        kc, _crop, _notices = _build_keychain(req, path, samples)
+        try:
+            mesh = kcm.build_mesh(kc)
+        except kcm.BooleanUnavailable as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except (RuntimeError, MemoryError) as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        return _stl_response(mesh, req, _keychain_size(kc))
+
+    if req.mode == "lithophane":
         scale = LITHO_QUALITY_SCALE[req.quality]
         samples = int(max(8, min(1200, round(req.samples * scale))))
         litho, _crop, _notices = _build_lithophane(req, path, samples)

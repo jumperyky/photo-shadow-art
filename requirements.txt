@@ -6,3 +6,6 @@ trimesh>=4.6
 mapbox-earcut>=1.0
 # --auto-face(顔検出)用。OpenCV 5.x は haarcascade のXMLを同梱しないため 4.x 系を使う
 opencv-python-headless>=4.8,<5
+# キーホルダーモードの形状クリップに使う3Dブーリアンのエンジン
+# (trimesh.boolean の manifold エンジン。これが無いと keychain だけ生成できない)
+manifold3d>=3.0

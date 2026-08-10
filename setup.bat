@@ -75,7 +75,7 @@ popd
 
 rem --- smoke test ---------------------------------------------
 echo [5/5] “®ìŠm”F‚ğ‚µ‚Ä‚¢‚Ü‚·...
-"%PYEXE%" -c "import fastapi, uvicorn, shapely, trimesh, mapbox_earcut"
+"%PYEXE%" -c "import fastapi, uvicorn, shapely, trimesh, mapbox_earcut, manifold3d"
 if errorlevel 1 goto :verify_failed
 
 echo.

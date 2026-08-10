@@ -1,5 +1,5 @@
 /** 生成方式。最初にこれを選び、以降のパラメータとプレビューが切り替わる。 */
-export type Mode = "shadow_art" | "lithophane";
+export type Mode = "shadow_art" | "lithophane" | "keychain";
 
 export type ShapeName = "square" | "rectangle" | "circle" | "hexagon";
 
@@ -28,11 +28,18 @@ export interface CommonParams {
   face_margin: number;
 }
 
-/** line_art_stl.py のパラメータと1対1で対応する */
-export interface ShadowArtParams extends CommonParams {
+/**
+ * 外形を持つモード(シャドウアート・キーホルダー)で共通の形状パラメータ。
+ * cropAspect() / cropOutline() はこれだけを見るので、両モードで使い回せる。
+ */
+export interface ShapeParams {
   shape: ShapeName;
   sides: number | null;
   aspect: number;
+}
+
+/** line_art_stl.py のパラメータと1対1で対応する */
+export interface ShadowArtParams extends CommonParams, ShapeParams {
   diameter: number;
   lines: number;
   angle: number;
@@ -54,6 +61,20 @@ export interface LithophaneParams extends CommonParams {
   positive: boolean;
 }
 
+/** keychain_stl.py のパラメータと1対1で対応する */
+export interface KeychainParams extends CommonParams, ShapeParams {
+  diameter: number;
+  frame_width: number;
+  min_thickness: number;
+  max_thickness: number;
+  /** 枠の高さ = max_thickness + well_depth。枠厚を直接は指定させない。 */
+  well_depth: number;
+  hole_diameter: number;
+  ring_margin: number;
+  samples: number;
+  positive: boolean;
+}
+
 export interface SizeInfo {
   outer_width_mm: number;
   outer_height_mm: number;
@@ -70,6 +91,12 @@ export interface SizeInfo {
   grid: string | null;
   face_count: number | null;
   radius_mm: number | null;
+  // キーホルダー専用
+  frame_thickness_mm: number | null;
+  well_depth_mm: number | null;
+  hole_diameter_mm: number | null;
+  resin_volume_ml: number | null;
+  relief_px: number | null;
 }
 
 export interface PreviewResponse {

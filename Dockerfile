@@ -39,7 +39,7 @@ COPY backend/requirements.txt ./backend/requirements.txt
 RUN pip install --no-cache-dir -r backend/requirements.txt
 
 # コア(CLI/両生成方式)とAPI本体
-COPY line_art_stl.py lithophane_stl.py photo_common.py ./
+COPY line_art_stl.py lithophane_stl.py keychain_stl.py photo_common.py ./
 COPY backend/app ./backend/app
 # サンプル画像はコード内で生成した合成画像で実在の人物写真ではない(README参照)
 COPY samples ./samples

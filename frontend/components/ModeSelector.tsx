@@ -28,7 +28,7 @@ export function ModeSelector({
           onClick={() => onChange(m.id)}
         >
           <span className="mode-icon" aria-hidden="true">
-            {m.id === "shadow_art" ? <ShadowArtGlyph /> : <LithophaneGlyph />}
+            {GLYPHS[m.id]()}
           </span>
           <span className="mode-text">
             <span className="mode-title">{m.label}</span>
@@ -41,6 +41,27 @@ export function ModeSelector({
 }
 
 /** 線幅で濃淡を表すことを示す図 */
+/**
+ * モードごとのアイコン。Record<Mode,...> にしてあるので、モードを足すと
+ * TypeScript がここの追加漏れを検出してくれる。
+ */
+const GLYPHS: Record<Mode, () => React.ReactElement> = {
+  shadow_art: () => <ShadowArtGlyph />,
+  lithophane: () => <LithophaneGlyph />,
+  keychain: () => <KeychainGlyph />,
+};
+
+function KeychainGlyph() {
+  return (
+    <svg viewBox="0 0 24 24" width="22" height="22" fill="none"
+         stroke="currentColor" strokeWidth="1.6">
+      <circle cx="12" cy="14.5" r="7" />
+      <circle cx="12" cy="14.5" r="4.2" strokeDasharray="1.5 1.5" />
+      <circle cx="12" cy="4" r="2.1" />
+    </svg>
+  );
+}
+
 function ShadowArtGlyph() {
   const widths = [1, 2, 3.4, 5, 3.4, 2, 1];
   return (

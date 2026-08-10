@@ -27,7 +27,7 @@ rem --- check that setup.bat has been run ----------------------
 if not exist "%PYEXE%" goto :no_venv
 if not exist "frontend\node_modules" goto :no_node_modules
 
-"%PYEXE%" -c "import fastapi, uvicorn, shapely, trimesh, mapbox_earcut" 2>nul
+"%PYEXE%" -c "import fastapi, uvicorn, shapely, trimesh, mapbox_earcut, manifold3d" 2>nul
 if errorlevel 1 goto :no_deps
 
 rem --- port check. connect_ex 0 means something is listening --

@@ -48,6 +48,7 @@ echo "==> 動作確認"
 ./.venv/bin/python -c "
 import sys; sys.path.insert(0, '.')
 import line_art_stl as la
+import keychain_stl as kc
 art = la.build_artwork('samples/test_face.png', diameter=150, num_lines=24,
                        samples_per_line=64)
 print(f'    ジオメトリ生成 OK (線 {art.line_count} 本)')
@@ -55,6 +56,8 @@ try:
     la._load_cascades(); print('    顔検出 OK')
 except la.FaceDetectionUnavailable as e:
     print(f'    顔検出は利用できません: {e}')
+print('    キーホルダー(3Dブーリアン) '
+      + ('OK' if kc.boolean_available() else '利用できません: manifold3d 未導入'))
 "
 
 echo

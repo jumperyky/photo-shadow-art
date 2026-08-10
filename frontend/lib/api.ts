@@ -3,6 +3,7 @@ import type {
   AppConfig,
   CropBox,
   FaceDetectResponse,
+  KeychainParams,
   LithophaneParams,
   Mode,
   PreviewResponse,
@@ -86,14 +87,20 @@ export function detectFace(
  * サーバーに渡すリクエストボディを組み立てる。
  * バックエンドは `mode` でスキーマを判別するので、方式ごとに必要な項目だけ送る。
  */
+export interface ModeParams {
+  shadow: ShadowArtParams;
+  litho: LithophaneParams;
+  keychain: KeychainParams;
+}
+
 function requestBody(
   mode: Mode,
   imageId: string,
-  shadow: ShadowArtParams,
-  litho: LithophaneParams,
+  p: ModeParams,
   crop: CropBox | null,
 ) {
   if (mode === "lithophane") {
+    const litho = p.litho;
     return {
       mode,
       image_id: imageId,
@@ -111,6 +118,34 @@ function requestBody(
     };
   }
 
+  if (mode === "keychain") {
+    const k = p.keychain;
+    const isBox = k.shape === "square" || k.shape === "rectangle";
+    return {
+      mode,
+      image_id: imageId,
+      crop,
+      auto_face: k.auto_face,
+      face_margin: k.face_margin,
+      gamma: k.gamma,
+      equalize: k.equalize,
+      shape: k.shape,
+      sides: k.sides,
+      // 円/多角形は等方なので aspect は 1 に固定して送る(シャドウアートと同じ)
+      aspect: isBox && k.sides === null ? k.aspect : 1.0,
+      diameter: k.diameter,
+      frame_width: k.frame_width,
+      min_thickness: k.min_thickness,
+      max_thickness: k.max_thickness,
+      well_depth: k.well_depth,
+      hole_diameter: k.hole_diameter,
+      ring_margin: k.ring_margin,
+      samples: k.samples,
+      positive: k.positive,
+    };
+  }
+
+  const shadow = p.shadow;
   const isBox = shadow.shape === "square" || shadow.shape === "rectangle";
   return {
     mode,
@@ -139,8 +174,7 @@ function requestBody(
 export function fetchPreview(
   mode: Mode,
   imageId: string,
-  shadow: ShadowArtParams,
-  litho: LithophaneParams,
+  params: ModeParams,
   crop: CropBox | null,
   previewSize: number,
   /** フィラメントの色 (#rrggbb)。描画にだけ効き、ジオメトリは変わらない。 */
@@ -150,7 +184,7 @@ export function fetchPreview(
   return postJson(
     "/api/preview",
     {
-      ...requestBody(mode, imageId, shadow, litho, crop),
+      ...requestBody(mode, imageId, params, crop),
       preview_size: previewSize,
       filament_color: filamentColor,
     },
@@ -162,8 +196,7 @@ export function fetchPreview(
 export async function fetchMesh(
   mode: Mode,
   imageId: string,
-  shadow: ShadowArtParams,
-  litho: LithophaneParams,
+  params: ModeParams,
   crop: CropBox | null,
   detail: "low" | "medium",
   signal?: AbortSignal,
@@ -172,7 +205,7 @@ export async function fetchMesh(
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      ...requestBody(mode, imageId, shadow, litho, crop),
+      ...requestBody(mode, imageId, params, crop),
       mesh_detail: detail,
     }),
     signal,
@@ -189,8 +222,7 @@ export interface StlResult {
 export async function fetchStl(
   mode: Mode,
   imageId: string,
-  shadow: ShadowArtParams,
-  litho: LithophaneParams,
+  params: ModeParams,
   crop: CropBox | null,
   filename: string,
   quality: Quality,
@@ -199,7 +231,7 @@ export async function fetchStl(
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      ...requestBody(mode, imageId, shadow, litho, crop),
+      ...requestBody(mode, imageId, params, crop),
       filename,
       quality,
     }),
