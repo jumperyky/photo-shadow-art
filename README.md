@@ -55,8 +55,10 @@ GUIでは最初にどちらかを選び、以降のトリミング比率・パ�
 photo-shadow-art/
 ├── README.md               ← このファイル
 ├── requirements.txt         ← コア(CLI)の依存
-├── setup.sh                 ← 初回セットアップ(venv + 依存インストール)
-├── dev.sh                   ← API + UI をまとめて起動する開発用スクリプト
+├── setup.sh / setup.bat     ← 初回セットアップ(venv + 依存インストール)
+├── dev.sh / start.bat       ← API + UI をまとめて起動
+├── update.bat               ← (Windows) git pull + 依存の入れ直し
+├── .gitattributes           ← .bat は CRLF、.sh は LF を強制
 ├── Dockerfile               ← NAS等で常時起動する場合のシングルコンテナ構成
 ├── docker-compose.yml       ← ↑の起動設定(3-6参照)
 ├── photo_common.py          ← 両方式で共通: 画像の読み込み・前処理・顔検出
@@ -101,14 +103,33 @@ photo-shadow-art/
 
 ### 3-0. かんたん手順(推奨)
 
+必要なもの: **Python 3.10以上、Node.js 20以上**。
+どちらもインストール時に PATH に通しておくこと
+(Windowsの Python インストーラなら「Add python.exe to PATH」にチェック)。
+
+**Windows** — エクスプローラーからダブルクリックするだけ。
+
+| ファイル | 用途 |
+|---|---|
+| `setup.bat` | 初回セットアップ(`.venv` 作成 + 依存インストール + 動作確認) |
+| `start.bat` | 起動。API と UI を別ウィンドウで立ち上げ、準備ができたらブラウザを開く |
+| `update.bat` | `git pull` してから依存を入れ直す |
+
+停止は、開いた2つのウィンドウ(`Photo Shadow Art - API` / `- UI`)を閉じる。
+ポートを変えたい場合は `cmd` から:
+
+```bat
+set PORT_API=8001 && set PORT_UI=3100 && start.bat
+```
+
+**macOS / Linux**
+
 ```bash
 ./setup.sh      # .venv 作成 + Python/npm の依存インストール + 動作確認
 ./dev.sh        # API(:8000) と UI(:3000) を起動
 ```
 
 ブラウザで http://localhost:3000 を開く。停止は Ctrl+C。
-
-必要なもの: Python 3.10以上、Node.js 20以上。
 `dev.sh` は `./.venv` があれば自動で使うので、仮想環境を activate する必要はない。
 
 ポートが埋まっている場合:
@@ -175,7 +196,7 @@ CORSの設定を気にする必要はありません(APIのURLを変えたい場
 
 | 使いたい端末 | 方式 | 必要なもの |
 |---|---|---|
-| PC・ノートPCが複数 | **各PCに `git clone` + `./setup.sh`** | 各PCにPython 3.10+ / Node 20+ |
+| PC・ノートPCが複数 | **各PCに `git clone` + セットアップ** | 各PCにPython 3.10+ / Node 20+ |
 | 同じWi-Fi内のスマホ・タブレット | 3-5 のLAN共有(PCを起動しておく) | PC側の設定のみ |
 | 別のLANからも / PCを起動したくない | 3-6 のNAS + Docker | NASとTailscale等 |
 
@@ -185,7 +206,8 @@ OS・CPU依存のバイナリ(`next-swc.linux-x64.node`、`cv2.abi3.so` 等)が
 入っていて、別のOS・別のマシンに移すと動かないため。
 
 gitで管理しているソース本体は **約460KB** しかない。これを `git clone` して
-`./setup.sh` を走らせれば、その端末向けの依存が正しく入る。
+`setup.bat`(Windows) / `./setup.sh`(macOS・Linux)を走らせれば、
+その端末向けの依存が正しく入る。
 
 > Dockerが効いてくるのは、**Python/Nodeを入れられない端末(スマホ・タブレット)
 > から使いたい場合**と、**環境構築を2回やりたくない場合**、そして
