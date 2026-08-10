@@ -160,6 +160,11 @@ export function PreviewStage({
                   穴径<b>{size.hole_diameter_mm.toFixed(1)} mm</b>
                 </span>
               ) : null}
+              {size.printable_px ? (
+                <span className="chip">
+                  印刷解像度<b>約 {size.printable_px}px</b>
+                </span>
+              ) : null}
               {size.face_count ? (
                 <span className="chip">
                   三角形<b>約 {(size.face_count / 1000).toFixed(0)}k</b>

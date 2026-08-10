@@ -182,6 +182,31 @@ def test_small_size_warns():
     assert any("解像度" in w for w in k.warnings), k.warnings
 
 
+def test_printable_px_follows_the_nozzle():
+    """
+    印刷できる横解像度はノズル径で決まる。格子(grid_px)とは別物。
+    分割数をいくら上げても printable_px は増えない。
+    """
+    a = kc.build_keychain(SAMPLE, shape="square", diameter=50.0,
+                          nozzle=0.4, samples=200)
+    b = kc.build_keychain(SAMPLE, shape="square", diameter=50.0,
+                          nozzle=0.2, samples=200)
+    assert a.printable_px == 125 and b.printable_px == 250
+    # 分割数を倍にしても印刷解像度は変わらない
+    c = kc.build_keychain(SAMPLE, shape="square", diameter=50.0,
+                          nozzle=0.4, samples=400)
+    assert c.printable_px == a.printable_px
+    assert c.grid_px > a.grid_px
+
+
+def test_fine_nozzle_lifts_the_size_warning():
+    """細いノズルなら小さくても解像度が足りるので警告が消えること"""
+    coarse = kc.build_keychain(SAMPLE, shape="square", diameter=30.0, nozzle=0.4)
+    fine = kc.build_keychain(SAMPLE, shape="square", diameter=30.0, nozzle=0.2)
+    assert any("解像度" in w for w in coarse.warnings)
+    assert not any("解像度" in w for w in fine.warnings), fine.warnings
+
+
 def test_flat_frame_warns():
     """枠が凹凸より高くない = レジンだまりが無い"""
     k = kc.build_keychain(SAMPLE, shape="square", max_thickness=2.4,

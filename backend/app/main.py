@@ -129,7 +129,7 @@ KEYCHAIN_DEFAULTS = {
     "shape": "circle", "sides": None, "aspect": 1.0, "diameter": 50.0,
     "frame_width": 3.0, "min_thickness": 0.6, "max_thickness": 2.4,
     "well_depth": 0.6, "hole_diameter": 3.5, "ring_margin": 2.5,
-    "samples": 320, "gamma": 0.8, "positive": False,
+    "samples": 320, "nozzle": 0.4, "gamma": 0.8, "positive": False,
     "equalize": False, "auto_face": False, "face_margin": 0.6,
 }
 
@@ -538,6 +538,7 @@ def _build_keychain(params, image_path: Path, samples: int):
             equalize=params.equalize,
             crop_box=crop_box,
             auto_face=False,
+            nozzle=params.nozzle,
         )
     except (ValueError, MemoryError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -559,7 +560,8 @@ def _keychain_size(kc) -> SizeInfo:
         well_depth_mm=round(kc.well_depth, 2),
         hole_diameter_mm=round(kc.body.hole_radius * 2, 2),
         resin_volume_ml=round(kc.resin_volume_ml, 2),
-        relief_px=kc.relief_px,
+        printable_px=kc.printable_px,
+        grid_px=kc.grid_px,
         face_count=kc.face_count_estimate,
     )
 

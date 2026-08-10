@@ -55,6 +55,7 @@ export const DEFAULT_KEYCHAIN: KeychainParams = {
   hole_diameter: 3.5,
   ring_margin: 2.5,
   samples: 320,
+  nozzle: 0.4,
   gamma: 0.8,
   positive: false,
   equalize: false,

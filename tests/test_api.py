@@ -668,7 +668,9 @@ def test_keychain_preview():
     assert size["well_depth_mm"] == 0.6
     assert size["hole_diameter_mm"] == 3.5
     assert size["resin_volume_ml"] > 0
-    assert size["relief_px"] > 0
+    # 六角形は幅が √3*r なので 43.3mm。/ 0.4mmノズル = 108px
+    assert size["printable_px"] == 108
+    assert size["grid_px"] > 0
 
 
 def test_keychain_is_not_routed_to_shadow_art():
@@ -718,6 +720,35 @@ def test_keychain_small_size_warns():
         "diameter": 30,
     })
     assert any("解像度" in w for w in res.json()["warnings"])
+
+
+def test_keychain_fine_nozzle_lifts_the_size_warning():
+    """
+    細いノズルなら同じサイズでも解像度が足りる。
+    警告のしきい値がノズル径に追従していることを固定する。
+    """
+    image_id = upload()
+    body = {"mode": "keychain", "image_id": image_id, "shape": "square",
+            "diameter": 30}
+    coarse = client.post("/api/preview", json={**body, "nozzle": 0.4}).json()
+    fine = client.post("/api/preview", json={**body, "nozzle": 0.2}).json()
+    assert coarse["size"]["printable_px"] == 75
+    assert fine["size"]["printable_px"] == 150
+    assert any("解像度" in w for w in coarse["warnings"])
+    assert not any("解像度" in w for w in fine["warnings"])
+
+
+def test_keychain_nozzle_does_not_change_geometry():
+    """ノズル径は判定にだけ使い、形状は一切変えないこと"""
+    image_id = upload()
+    body = {"mode": "keychain", "image_id": image_id, "shape": "square"}
+    a = client.post("/api/preview", json={**body, "nozzle": 0.4}).json()["size"]
+    b = client.post("/api/preview", json={**body, "nozzle": 0.2}).json()["size"]
+    for key in ("outer_width_mm", "outer_height_mm", "outer_depth_mm",
+                "design_width_mm", "frame_thickness_mm", "resin_volume_ml",
+                "face_count", "grid_px"):
+        assert a[key] == b[key], key
+    assert a["printable_px"] != b["printable_px"]
 
 
 def test_keychain_mesh_and_stl():

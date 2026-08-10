@@ -148,6 +148,9 @@ class KeychainParams(CommonParams):
     hole_diameter: float = Field(default=3.5, gt=0.0, le=50.0)
     ring_margin: float = Field(default=2.5, gt=0.0, le=50.0)
     samples: int = Field(default=320, ge=8, le=800)
+    # ノズル径。ジオメトリには影響せず、印刷できる横解像度の判定にだけ使う。
+    # 立てて印刷するので横方向はここで頭打ちになる。
+    nozzle: float = Field(default=0.4, gt=0.0, le=2.0)
 
     # リソフェインと同じく暗部の階調を出すため1未満が定番
     gamma: float = Field(default=0.8, gt=0.0, le=5.0)
@@ -280,7 +283,8 @@ class SizeInfo(BaseModel):
     well_depth_mm: Optional[float] = None        # レジンだまりの深さ
     hole_diameter_mm: Optional[float] = None
     resin_volume_ml: Optional[float] = None      # 必要なレジンの量の目安
-    relief_px: Optional[int] = None              # デザイン部の実効解像度(格子の列数)
+    printable_px: Optional[int] = None           # 実際に印刷できる横解像度(ノズル径で決まる)
+    grid_px: Optional[int] = None                # メッシュの格子の列数(印刷の細かさではない)
 
 
 class PreviewResponse(BaseModel):

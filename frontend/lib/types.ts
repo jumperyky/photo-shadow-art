@@ -72,6 +72,8 @@ export interface KeychainParams extends CommonParams, ShapeParams {
   hole_diameter: number;
   ring_margin: number;
   samples: number;
+  /** ノズル径。ジオメトリには影響せず、印刷できる解像度の判定にだけ使う。 */
+  nozzle: number;
   positive: boolean;
 }
 
@@ -96,7 +98,8 @@ export interface SizeInfo {
   well_depth_mm: number | null;
   hole_diameter_mm: number | null;
   resin_volume_ml: number | null;
-  relief_px: number | null;
+  printable_px: number | null;
+  grid_px: number | null;
 }
 
 export interface PreviewResponse {

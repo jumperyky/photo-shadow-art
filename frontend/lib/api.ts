@@ -141,6 +141,7 @@ function requestBody(
       hole_diameter: k.hole_diameter,
       ring_margin: k.ring_margin,
       samples: k.samples,
+      nozzle: k.nozzle,
       positive: k.positive,
     };
   }

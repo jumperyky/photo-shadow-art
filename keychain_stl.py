@@ -58,8 +58,10 @@ Y_MARGIN_MM = 1.0
 PAD_MIN_MM = 1.0
 
 # --- 警告のしきい値 ---------------------------------------------------------
-NOZZLE_MM = 0.4               # 一般的なノズル径。実効解像度の目安に使う
-MIN_DESIGN_WIDTH_MM = 45.0    # これ未満は顔が潰れるので警告
+DEFAULT_NOZZLE_MM = 0.4       # 一般的なノズル径
+# 印刷できる横解像度の下限。これを下回ると顔の細部が潰れる。
+# 0.4mmノズルなら 45mm 相当。ノズルを細くすれば同じpx数を小さいサイズで得られる。
+MIN_PRINTABLE_PX = 110
 MIN_WELL_DEPTH_MM = 0.4       # これ未満はレジンが溜まらない
 MIN_HOLE_DIAMETER_MM = 2.5    # これ未満はリングが通らない
 MIN_RING_MARGIN_MM = 2.0      # 穴の上の肉厚。層間剥離方向に効くので余裕を持つ
@@ -145,6 +147,7 @@ class Keychain:
     well_depth: float
     relief_min: float
     relief_max: float
+    nozzle: float = DEFAULT_NOZZLE_MM
     warnings: list = field(default_factory=list)
 
     # --- 実物の寸法(切り抜き後) ---
@@ -173,11 +176,22 @@ class Keychain:
         return self.outer_width, self.outer_height, self.frame_thickness
 
     @property
-    def relief_px(self) -> int:
-        """画像部に乗っている格子の列数。実効解像度の指標。"""
+    def grid_px(self) -> int:
+        """画像部に乗っている格子の列数。メッシュの細かさ(印刷の細かさではない)。"""
         nz, nx = self.slab.thickness.shape
         minx, _miny, maxx, _maxy = self.bbox
         return int(round(nx * self.design_width / (maxx - minx)))
+
+    @property
+    def printable_px(self) -> int:
+        """
+        実際に印刷できる横方向の解像度。
+
+        立てて印刷するので、横は押出し幅(≒ノズル径)、縦はレイヤー高で決まる。
+        格子をいくら細かくしてもこの値は増えない(ファイルが重くなるだけ)。
+        ノズルを細くするか、作品を大きくするしか上げる方法はない。
+        """
+        return int(self.design_width / self.nozzle)
 
     @property
     def resin_volume_ml(self) -> float:
@@ -210,25 +224,27 @@ class Keychain:
 # ---------------------------------------------------------------------------
 # 警告
 # ---------------------------------------------------------------------------
-def check_keychain_safety(design_width_mm, relief_px, frame_thickness,
-                          max_thickness, hole_diameter, ring_margin):
+def check_keychain_safety(design_width_mm, grid_px, printable_px, nozzle,
+                          frame_thickness, max_thickness, hole_diameter,
+                          ring_margin):
     """造形上まずい設定を日本語で警告する(他モジュールと同じくリストを返す)。"""
     warnings = []
 
-    if design_width_mm < MIN_DESIGN_WIDTH_MM:
-        eff = int(design_width_mm / NOZZLE_MM)
+    if printable_px < MIN_PRINTABLE_PX:
+        need = MIN_PRINTABLE_PX * nozzle
         warnings.append(
-            f"警告: デザイン部が {design_width_mm:.0f}mm と小さく、"
-            f"実質の横解像度は約{eff}ピクセル相当です。"
-            f"立てて印刷するため横方向はノズル径({NOZZLE_MM}mm)で頭打ちになります。"
-            f"顔をはっきり出すには50mm以上を推奨します。"
+            f"警告: デザイン部 {design_width_mm:.0f}mm・ノズル {nozzle}mm では"
+            f"印刷できる横解像度が約{printable_px}ピクセル相当しかなく、"
+            f"顔の細部が潰れます。"
+            f"デザイン部を{need:.0f}mm以上にするか、細いノズルを使ってください"
+            f"(立てて印刷するため横方向はノズル径で頭打ちになります)。"
         )
 
-    if relief_px > 0 and design_width_mm / relief_px > NOZZLE_MM:
+    if grid_px > 0 and design_width_mm / grid_px > nozzle:
         warnings.append(
-            f"警告: 分割数が粗く、格子の間隔が "
-            f"{design_width_mm / relief_px:.2f}mm とノズル径を上回っています。"
-            f"分割数を上げると精細になります。"
+            f"警告: 分割数が粗く、格子の間隔 "
+            f"{design_width_mm / grid_px:.2f}mm がノズル径 {nozzle}mm を"
+            f"上回っています。分割数を上げると精細になります。"
         )
 
     well = frame_thickness - max_thickness
@@ -270,6 +286,7 @@ def build_keychain(image, shape="circle", diameter=50.0, aspect=1.0,
                    hole_diameter=3.5, ring_margin=2.5, samples=320, gamma=0.8,
                    positive=False, equalize=False, crop_box=None,
                    auto_face=False, face_margin=0.6,
+                   nozzle=DEFAULT_NOZZLE_MM,
                    max_samples=DEFAULT_MAX_SAMPLES) -> Keychain:
     """
     画像とパラメータから厚みマップまでを作る。メッシュ化は含まないので、
@@ -339,11 +356,12 @@ def build_keychain(image, shape="circle", diameter=50.0, aspect=1.0,
     kc = Keychain(slab=slab, relief=relief, mask=inside, body=body,
                   bbox=(minx, miny, maxx, maxy),
                   frame_thickness=frame_thickness, well_depth=well_depth,
-                  relief_min=min_thickness, relief_max=max_thickness)
+                  relief_min=min_thickness, relief_max=max_thickness,
+                  nozzle=nozzle)
 
     kc.warnings = check_keychain_safety(
-        kc.design_width, kc.relief_px, frame_thickness, max_thickness,
-        hole_diameter, ring_margin)
+        kc.design_width, kc.grid_px, kc.printable_px, nozzle,
+        frame_thickness, max_thickness, hole_diameter, ring_margin)
     kc.warnings += lp.check_thickness_safety(min_thickness, max_thickness)
     kc.warnings += pc.check_print_size(*kc.footprint())
 
@@ -498,14 +516,15 @@ def generate_stl(image_path, output_path, shape="circle", diameter=50.0,
                  max_thickness=2.4, well_depth=0.6, hole_diameter=3.5,
                  ring_margin=2.5, samples=320, gamma=0.8, positive=False,
                  equalize=False, crop_box=None, auto_face=False,
-                 face_margin=0.6, preview_path=None, verbose=True):
+                 face_margin=0.6, nozzle=DEFAULT_NOZZLE_MM,
+                 preview_path=None, verbose=True):
     kc = build_keychain(
         image_path, shape=shape, diameter=diameter, aspect=aspect,
         frame_width=frame_width, min_thickness=min_thickness,
         max_thickness=max_thickness, well_depth=well_depth,
         hole_diameter=hole_diameter, ring_margin=ring_margin, samples=samples,
         gamma=gamma, positive=positive, equalize=equalize, crop_box=crop_box,
-        auto_face=auto_face, face_margin=face_margin,
+        auto_face=auto_face, face_margin=face_margin, nozzle=nozzle,
     )
     if verbose:
         for w in kc.warnings:
@@ -519,7 +538,8 @@ def generate_stl(image_path, output_path, shape="circle", diameter=50.0,
     if verbose:
         w, h, d = kc.footprint()
         print(f"外形 {w:.1f} x {h:.1f} x {d:.2f} mm / "
-              f"三角形 {len(mesh.faces)} / レジン約 {kc.resin_volume_ml:.1f} ml")
+              f"三角形 {len(mesh.faces)} / レジン約 {kc.resin_volume_ml:.1f} ml / "
+              f"印刷できる横解像度 約{kc.printable_px}px")
     return mesh
 
 
@@ -551,6 +571,8 @@ def main():
                     default=None, help="0..1 の相対クロップ範囲")
     ap.add_argument("--auto-face", action="store_true", help="顔を検出して自動クロップ")
     ap.add_argument("--face-margin", type=float, default=0.6)
+    ap.add_argument("--nozzle", type=float, default=DEFAULT_NOZZLE_MM,
+                    help="ノズル径(mm)。印刷できる横解像度の判定に使う")
     ap.add_argument("--preview", default=None, help="プレビューPNGの出力先")
     args = ap.parse_args()
 
@@ -569,7 +591,7 @@ def main():
         positive=args.positive, equalize=args.equalize,
         crop_box=tuple(args.crop) if args.crop else None,
         auto_face=args.auto_face, face_margin=args.face_margin,
-        preview_path=args.preview,
+        nozzle=args.nozzle, preview_path=args.preview,
     )
     return 0
 
