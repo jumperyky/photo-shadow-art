@@ -37,6 +37,7 @@ export const DEFAULT_LITHOPHANE: LithophaneParams = {
   // リソフェインは暗部の階調を出すため1未満が定番
   gamma: 0.8,
   positive: false,
+  side_supports: false,
   equalize: false,
   auto_face: false,
   face_margin: 0.6,

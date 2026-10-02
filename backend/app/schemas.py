@@ -113,6 +113,8 @@ class LithophaneParams(CommonParams):
     samples: int = Field(default=400, ge=8, le=1200)
     curve: float = Field(default=0.0, ge=0.0, le=350.0)
     positive: bool = False
+    # 立てて印刷するときの揺れ止め(左右のフィン)。湾曲させたときは付かない。
+    side_supports: bool = False
 
     # リソフェインは暗部の階調を出すため 1未満が定番
     gamma: float = Field(default=0.8, gt=0.0, le=5.0)

@@ -222,6 +222,123 @@ def test_samples_is_clamped():
 
 
 # ---------------------------------------------------------------------------
+# サイドサポート(揺れ止め)
+# ---------------------------------------------------------------------------
+def _supported(**kw):
+    """左端が厚く右端が薄い板。左右で側面の厚みが違う状態で確かめる。"""
+    kw = {"width_mm": 100.0, "samples": 48, "min_thickness": 0.6,
+          "max_thickness": 3.0, **kw}
+    return lp.build_lithophane(ramp_image(w=96, h=128), side_supports=True, **kw)
+
+
+def test_side_supports_are_off_by_default():
+    lit = lp.build_lithophane(ramp_image(), width_mm=100, samples=48)
+    assert not lit.has_side_supports
+    assert lp.build_side_supports(lit) is None
+    assert len(lp.build_mesh(lit).faces) == lit.face_count
+
+
+def test_side_supports_stand_on_both_sides_and_keep_the_plate_intact():
+    lit = _supported()
+    plain = lp.build_mesh(lp.build_lithophane(
+        ramp_image(w=96, h=128), width_mm=100.0, samples=48))
+    mesh = lp.build_mesh(lit, validate=True)
+
+    # 板そのものには手を入れていない(先頭に元のメッシュがそのまま入っている)
+    assert np.array_equal(mesh.faces[:len(plain.faces)], plain.faces)
+    assert np.allclose(mesh.vertices[:len(plain.vertices)], plain.vertices)
+
+    # 左右どちらにも張り出し、高さは変わらず、ベッド(Z=0)に接地している
+    lo, hi = mesh.bounds
+    assert lo[0] < -1.0 and hi[0] > lit.width_mm + 1.0
+    assert math.isclose(-lo[0], hi[0] - lit.width_mm, abs_tol=1e-9), "左右非対称"
+    assert math.isclose(lo[2], 0.0, abs_tol=1e-9)
+    assert math.isclose(hi[2], lit.height_mm, rel_tol=1e-9)
+
+    # シェルを足しても、開いた辺・非多様体の辺ができない
+    rep = _mesh_report(mesh)
+    assert rep == {"open": 0, "nonmanifold": 0}, rep
+    assert mesh.is_winding_consistent
+
+
+def test_side_supports_footprint_matches_mesh_bounds():
+    for width in (40.0, 100.0, 400.0):
+        lit = _supported(width_mm=width)
+        span = np.ptp(lp.build_mesh(lit).bounds, axis=0)
+        fw, fh, fd = lit.footprint()
+        assert math.isclose(fw, span[0], abs_tol=1e-6), (width, fw, span[0])
+        assert math.isclose(fd, span[1], abs_tol=1e-6), (width, fd, span[1])
+        assert math.isclose(fh, span[2], abs_tol=1e-6), (width, fh, span[2])
+        # フィンは板の厚みより十分に奥行きがある(揺れ止めとして効く)
+        assert fd >= 15.0
+
+
+def test_side_supports_touch_the_plate_only_through_tabs():
+    """
+    フィンは板から離れていて、板に届くのはタブの先端だけであること。
+    面で接すると融着して剥がせなくなる。また、タブは板のいちばん薄い所の
+    内側に収まっていること(はみ出すと明るい側の端でタブが宙に浮く)。
+    """
+    lit = _supported()
+    sup = lp.build_side_supports(lit)
+    v = sup.vertices
+    W = lit.width_mm
+
+    near = v[(v[:, 0] > -lp.SUPPORT_GAP + 1e-9)
+             & (v[:, 0] < W + lp.SUPPORT_GAP - 1e-9)]
+    assert len(near) > 0, "タブが板に届いていない"
+    # 隙間より内側にある頂点は、すべて板の中に埋まったタブの先端
+    assert ((near[:, 0] > 0) & (near[:, 0] < W)).all(), \
+        "フィンが板の側面に面で接している"
+    depth = np.minimum(near[:, 0], W - near[:, 0])
+    assert np.allclose(depth, lp.SUPPORT_TAB_EMBED)
+    assert near[:, 1].min() > 0.0
+    assert near[:, 1].max() < lit.thickness.min()
+
+    # 左右の両方にタブがある
+    assert (near[:, 0] < W / 2).any() and (near[:, 0] > W / 2).any()
+
+
+def test_side_support_tabs_reach_the_top():
+    """揺れがいちばん大きいのは上端なので、最上段のタブは上端のすぐ下にあること"""
+    for h in (64, 128, 400):
+        lit = lp.build_lithophane(ramp_image(w=96, h=h), width_mm=100.0,
+                                  samples=32, side_supports=True)
+        tab_z = lp._support_layout(lit)["tab_z"]
+        assert lit.height_mm - tab_z.max() < 2.0
+        assert tab_z.min() > 0.0
+        assert np.diff(tab_z).max() <= lp.SUPPORT_TAB_PITCH + 1e-9
+
+
+def test_side_supports_survive_a_very_thin_plate():
+    """最小厚みが極端に薄くても、タブが板の厚みからはみ出さないこと"""
+    lit = _supported(min_thickness=0.2, max_thickness=1.0)
+    y0, y1 = lp._support_layout(lit)["tab_y"]
+    assert 0.0 < y0 < y1 < 0.2
+    assert _mesh_report(lp.build_mesh(lit)) == {"open": 0, "nonmanifold": 0}
+
+
+def test_side_supports_are_skipped_when_curved():
+    """湾曲させた板は自立するので、指定されていても付けないこと"""
+    flat = lp.build_lithophane(ramp_image(), width_mm=100, samples=48, curve_deg=60)
+    lit = lp.build_lithophane(ramp_image(), width_mm=100, samples=48, curve_deg=60,
+                              side_supports=True)
+    assert lit.side_supports and not lit.has_side_supports
+    assert lit.footprint() == flat.footprint()
+    assert len(lp.build_mesh(lit).faces) == lit.face_count
+
+
+def test_convex_prism_faces_outward_either_way_round():
+    """左右で鏡像にしたときに頂点の回り方が逆になっても裏返らないこと"""
+    square = [(0.0, 0.0), (2.0, 0.0), (2.0, 3.0), (0.0, 3.0)]
+    for profile in (square, square[::-1]):
+        for axis in (0, 1, 2):
+            m = lp._convex_prism(profile, axis=axis, lo=5.0, hi=1.0)
+            assert m.is_watertight and m.is_winding_consistent
+            assert math.isclose(m.volume, 24.0, rel_tol=1e-9)
+
+
+# ---------------------------------------------------------------------------
 # 警告
 # ---------------------------------------------------------------------------
 def test_thickness_warnings():

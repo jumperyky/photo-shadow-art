@@ -115,6 +115,7 @@ function requestBody(
       samples: litho.samples,
       curve: litho.curve,
       positive: litho.positive,
+      side_supports: litho.side_supports,
     };
   }
 

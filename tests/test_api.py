@@ -384,6 +384,62 @@ def test_lithophane_stl_is_printable():
     assert mesh.volume > 0
 
 
+def test_lithophane_side_supports_widen_the_footprint():
+    """サイドサポートを付けると外形が広がり、絵柄の寸法は変わらないこと"""
+    image_id = upload()
+    base = {"mode": "lithophane", "image_id": image_id, "width": 100}
+    plain = client.post("/api/preview", json=base).json()
+    res = client.post("/api/preview", json={**base, "side_supports": True})
+    assert res.status_code == 200, res.text
+    body = res.json()
+    size, ref = body["size"], plain["size"]
+    assert size["outer_width_mm"] > ref["outer_width_mm"] + 5
+    assert size["outer_depth_mm"] > ref["outer_depth_mm"] + 10
+    assert size["outer_height_mm"] == ref["outer_height_mm"]
+    assert size["design_width_mm"] == ref["design_width_mm"] == 100.0
+    assert body["notices"] == plain["notices"]
+    # プレビュー画像(透過光のシミュレーション)はサポートの有無で変わらない
+    assert body["image"] == plain["image"]
+
+
+def test_lithophane_side_supports_are_dropped_when_curved():
+    image_id = upload()
+    base = {"mode": "lithophane", "image_id": image_id, "width": 100, "curve": 60}
+    plain = client.post("/api/preview", json=base).json()
+    body = client.post("/api/preview", json={**base, "side_supports": True}).json()
+    assert body["size"] == plain["size"]
+    assert any("サイドサポート" in n for n in body["notices"])
+
+
+def test_lithophane_side_supports_reach_mesh_and_stl():
+    """3DプレビューにもSTLにも同じサポートが入ること"""
+    import trimesh
+
+    image_id = upload()
+    base = {"mode": "lithophane", "image_id": image_id, "width": 80,
+            "samples": 120}
+
+    faces = {}
+    for on in (False, True):
+        res = client.post("/api/mesh", json={**base, "side_supports": on})
+        assert res.status_code == 200, res.text
+        faces[on] = int(res.headers["x-face-count"])
+    assert faces[True] > faces[False]
+
+    res = client.post("/api/stl", json={
+        **base, "quality": "draft", "side_supports": True})
+    assert res.status_code == 200, res.text
+    mesh = trimesh.load(io.BytesIO(res.content), file_type="stl")
+    assert mesh.is_watertight
+    assert mesh.is_winding_consistent
+    span = mesh.bounds[1] - mesh.bounds[0]
+    assert span[0] > 80 + 5 and span[1] > 10
+    reported = [float(v) for v in res.headers["x-outer-size-mm"].split("x")]
+    assert abs(reported[0] - span[0]) < 0.01
+    assert abs(reported[1] - span[2]) < 0.01
+    assert abs(reported[2] - span[1]) < 0.01
+
+
 def test_lithophane_quality_changes_resolution():
     """品質設定で分割数が変わること"""
     image_id = upload()

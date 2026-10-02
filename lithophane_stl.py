@@ -10,6 +10,7 @@ lithophane_stl.py
 使い方:
     python3 lithophane_stl.py photo.jpg output.stl --width 100
     python3 lithophane_stl.py photo.jpg output.stl --width 120 --curve 60
+    python3 lithophane_stl.py photo.jpg output.stl --width 100 --side-supports
 
 このモジュールはCLIとしてもライブラリとしても使える。
 Web API(backend/)からは主に以下を呼ぶ:
@@ -50,6 +51,23 @@ FACE_COUNT_WARN = 2_000_000
 # 分割数の上限(横方向)。縦方向は縦長画像のためにこの4倍まで許す。
 DEFAULT_MAX_SAMPLES = 1200
 
+# --- サイドサポート(立てて印刷するときの揺れ止め) ---------------------------
+# 板の左右に、板と直交する三角形のフィンを立てる。フィンは板から SUPPORT_GAP
+# だけ離し、細いタブだけでつなぐので、印刷後はフィンを倒せばタブが折れて外れる。
+# 寸法は 0.4mm ノズル・レイヤー高 0.1〜0.2mm を想定した決め打ち。
+SUPPORT_GAP = 0.5            # 板の側面とフィンの隙間(mm)。狭いと面で融着する
+SUPPORT_FIN_THICKNESS = 0.8  # フィンの厚み(mm)。壁2本ぶん
+SUPPORT_FIN_TOP = 4.0        # フィン上端の奥行き(mm)
+SUPPORT_BASE_RATIO = 0.3     # フィン下端の奥行き = 板の高さ × この比率
+SUPPORT_BASE_RANGE = (15.0, 80.0)
+SUPPORT_FOOT_WIDTH = 5.0     # フィンの外側に広げる足(ベッドへの定着用)の幅(mm)
+SUPPORT_FOOT_HEIGHT = 0.4
+SUPPORT_TAB_PITCH = 8.0      # タブの縦方向の間隔(mm)
+SUPPORT_TAB_WIDTH = 0.5      # タブの厚み方向の幅(mm)。線1本ぶん
+SUPPORT_TAB_ROOT = 1.6       # タブの高さ: フィン側(mm)
+SUPPORT_TAB_TIP = 0.4        # タブの高さ: 板に埋まる先端(mm)。板側を細くして、そこで折れるようにする
+SUPPORT_TAB_EMBED = 0.2      # タブを板・フィンに食い込ませる量(mm)
+
 
 def grid_shape(src_w, src_h, samples, max_samples=DEFAULT_MAX_SAMPLES):
     """
@@ -83,6 +101,7 @@ class Lithophane:
     curve_deg: float            # 0 なら平板
     src_size: tuple = (1, 1)    # サンプリング元画像の (幅, 高さ) px
     warnings: list = field(default_factory=list)
+    side_supports: bool = False  # 左右に揺れ止めのフィンを付ける(平板のみ)
 
     @property
     def samples_x(self) -> int:
@@ -112,11 +131,26 @@ class Lithophane:
         """build_mesh() が生成する三角形の数"""
         return face_count_for(self.samples_x, self.samples_z)
 
+    @property
+    def has_side_supports(self) -> bool:
+        """
+        実際にサイドサポートを付けるか。湾曲させた板はそれ自体が自立するうえ、
+        側面が斜めを向いてフィンを沿わせられないので、平板のときだけ付ける。
+        """
+        return self.side_supports and self.curve_deg <= 0
+
     def footprint(self):
         """
         造形時に占める外形 (幅, 高さ, 奥行き) を mm で返す。
         湾曲させると幅は弦の長さに縮み、そのぶん奥行きが出る。
+        サイドサポートを付けるとフィンのぶん幅と奥行きが増える。
         """
+        if self.has_side_supports:
+            lay = _support_layout(self)
+            y_lo = min(0.0, lay["fin_y"][0])
+            y_hi = max(self.max_thickness, lay["fin_y"][1])
+            return (self.width_mm + 2.0 * lay["reach"], self.height_mm,
+                    y_hi - y_lo)
         if self.curve_deg <= 0:
             return self.width_mm, self.height_mm, self.max_thickness
         R = self.radius_mm
@@ -166,7 +200,7 @@ def build_lithophane(image, width_mm=100.0, min_thickness=0.6,
                      max_thickness=3.0, samples=400, gamma=0.8,
                      positive=False, equalize=False, crop_box=None,
                      auto_face=False, face_margin=0.6, curve_deg=0.0,
-                     max_samples=1200):
+                     max_samples=1200, side_supports=False):
     """
     画像から厚みマップを生成する。メッシュ化を伴わないので、
     プレビュー用途ではこれだけを呼べばよい。
@@ -176,6 +210,7 @@ def build_lithophane(image, width_mm=100.0, min_thickness=0.6,
     gamma:     1未満で暗部の階調が強調される(リソフェインでは 0.8 前後が定番)。
     positive:  True で「明るいところを厚く」する(レリーフ向き)。
                既定は False =「暗いところを厚く」(裏から照らす通常のリソフェイン)。
+    side_supports: True で左右に折り取り式の揺れ止めフィンを付ける(平板のみ)。
     """
     if max_thickness < min_thickness:
         raise ValueError("最大厚みは最小厚み以上にしてください。")
@@ -213,6 +248,7 @@ def build_lithophane(image, width_mm=100.0, min_thickness=0.6,
         curve_deg=float(curve_deg),
         src_size=(src_w, src_h),
         warnings=warnings,
+        side_supports=bool(side_supports),
     )
 
     fw, fh, fd = litho.footprint()
@@ -323,6 +359,133 @@ def _wall_faces(inner_line, outer_line, flip=False):
     ])
 
 
+# ---------------------------------------------------------------------------
+# サイドサポート(立てて印刷するときの揺れ止め)
+# ---------------------------------------------------------------------------
+def _support_layout(litho):
+    """
+    サイドサポートの寸法を決める。footprint() と build_side_supports() の
+    両方がこれを使う(外形の見積もりと実メッシュが食い違わないように)。
+
+    タブは板の側面のうち、どの高さでも必ず中身が詰まっている範囲
+    (裏面から min_thickness まで)に収める。側面の厚みは画像の端の列で
+    変わるので、ここからはみ出すと明るい行でタブが宙に浮く。
+    """
+    H = litho.height_mm
+
+    tab_w = min(SUPPORT_TAB_WIDTH, litho.min_thickness * 0.85)
+    # 裏面寄りに置く(折り跡が絵柄の面に出ない)。裏面とは同一平面にしない。
+    tab_y0 = min(0.05, (litho.min_thickness - tab_w) / 2.0)
+    center = tab_y0 + tab_w / 2.0
+
+    base = float(np.clip(H * SUPPORT_BASE_RATIO, *SUPPORT_BASE_RANGE))
+
+    # 揺れは上端ほど大きいので、最上段のタブはフィンの上端ぎりぎりに置く
+    z_lo = min(3.0, H * 0.25)
+    z_hi = H - SUPPORT_TAB_ROOT / 2.0 - 0.2
+    if z_hi <= z_lo:
+        tab_z = np.array([H / 2.0])
+    else:
+        n = max(2, int(math.ceil((z_hi - z_lo) / SUPPORT_TAB_PITCH)) + 1)
+        tab_z = np.linspace(z_lo, z_hi, n)
+
+    return {
+        "fin_y": (center - base / 2.0, center + base / 2.0),
+        "fin_top_y": (center - SUPPORT_FIN_TOP / 2.0,
+                      center + SUPPORT_FIN_TOP / 2.0),
+        "tab_y": (tab_y0, tab_y0 + tab_w),
+        "tab_z": tab_z,
+        # 板の側面から外側へ張り出す量(片側)
+        "reach": SUPPORT_GAP + SUPPORT_FIN_THICKNESS + SUPPORT_FOOT_WIDTH,
+    }
+
+
+def _convex_prism(profile, axis, lo, hi):
+    """
+    凸多角形 profile を axis 方向に lo..hi で押し出した水密なプリズムを返す。
+    profile は axis 以外の2軸(番号の小さい順)の座標。頂点の回り方はどちらでも
+    よく、最後に体積の符号で外向きに揃える(左右で鏡像にしても裏返らない)。
+    """
+    pts = np.asarray(profile, dtype=np.float64)
+    n = len(pts)
+    plane = [a for a in range(3) if a != axis]
+    verts = np.zeros((2 * n, 3))
+    verts[:n, plane] = pts
+    verts[n:, plane] = pts
+    verts[:n, axis] = min(lo, hi)
+    verts[n:, axis] = max(lo, hi)
+
+    faces = []
+    for i in range(1, n - 1):
+        faces.append((0, i, i + 1))
+        faces.append((n, n + i + 1, n + i))
+    for i in range(n):
+        j = (i + 1) % n
+        faces.append((i, n + i, n + j))
+        faces.append((i, n + j, j))
+
+    mesh = trimesh.Trimesh(vertices=verts, faces=np.asarray(faces),
+                           process=False)
+    if mesh.volume < 0:
+        mesh.invert()
+    return mesh
+
+
+def build_side_supports(litho):
+    """
+    板の左右に立てる揺れ止め(フィン + 足 + タブ)のメッシュを返す。
+    サポートを付けない設定なら None。
+
+    上から見ると板とフィンで「エ」の字になり、板の弱い向き(厚み方向)の
+    揺れをフィンの面内剛性で受ける。フィンと板は SUPPORT_GAP だけ離れていて、
+    つないでいるのは板側が細いくさび形のタブだけなので、フィンを板の面の
+    ほうへ倒すとタブが板の際で折れて外れる。
+
+    各部品は閉じた別々のシェルで、重ねて置いてあるだけ(ブーリアンはしない)。
+    タブの先端は板の中に SUPPORT_TAB_EMBED だけ埋めてある。スライサーは
+    重なったシェルを和集合として扱うので、印刷時には一体になる。
+    板のメッシュに手を入れないので、分割数が多くても時間もメモリも増えない。
+    """
+    if not litho.has_side_supports:
+        return None
+
+    lay = _support_layout(litho)
+    H = litho.height_mm
+    (fy0, fy1), (ty0, ty1) = lay["fin_y"], lay["fin_top_y"]
+    tab_y0, tab_y1 = lay["tab_y"]
+
+    fin_in = SUPPORT_GAP
+    fin_out = SUPPORT_GAP + SUPPORT_FIN_THICKNESS
+
+    parts = []
+    # side: 外向きの符号。-1 が左端(x=0)、+1 が右端(x=幅)。
+    for edge, side in ((0.0, -1.0), (litho.width_mm, 1.0)):
+        def x(d, edge=edge, side=side):
+            """板の側面から外向きに d(mm) の位置。負なら板の中。"""
+            return edge + side * d
+
+        parts.append(_convex_prism(
+            [(fy0, 0.0), (fy1, 0.0), (ty1, H), (ty0, H)],
+            axis=0, lo=x(fin_in), hi=x(fin_out)))
+
+        parts.append(_convex_prism(
+            [(fy0, 0.0), (fy1, 0.0),
+             (fy1, SUPPORT_FOOT_HEIGHT), (fy0, SUPPORT_FOOT_HEIGHT)],
+            axis=0, lo=x(fin_out - SUPPORT_TAB_EMBED), hi=x(lay["reach"])))
+
+        x_tip = x(-SUPPORT_TAB_EMBED)
+        x_root = x(fin_in + SUPPORT_TAB_EMBED)
+        for zc in lay["tab_z"]:
+            parts.append(_convex_prism(
+                [(x_tip, zc - SUPPORT_TAB_TIP / 2.0),
+                 (x_root, zc - SUPPORT_TAB_ROOT / 2.0),
+                 (x_root, zc + SUPPORT_TAB_ROOT / 2.0),
+                 (x_tip, zc + SUPPORT_TAB_TIP / 2.0)],
+                axis=1, lo=tab_y0, hi=tab_y1))
+
+    return trimesh.util.concatenate(parts)
+
+
 def build_mesh(litho, validate=False):
     """
     厚みマップから水密(watertight)なメッシュを組む。
@@ -334,6 +497,9 @@ def build_mesh(litho, validate=False):
     (厚みは常に正なので内外が入れ替わることもない)。そのため通常は検証を
     行わない。validate=True で明示的に確認できる。大きなメッシュでは
     検証に数秒かかるので、回帰テストからのみ有効にしている。
+
+    litho.has_side_supports のときは、揺れ止めのフィンを別シェルとして足す
+    (build_side_supports 参照)。検証の対象は板だけ。
     """
     nz, nx = litho.thickness.shape
 
@@ -379,6 +545,12 @@ def build_mesh(litho, validate=False):
             raise RuntimeError("メッシュが水密になっていません。")
         if mesh.volume <= 0:
             raise RuntimeError("メッシュの表裏が反転しています。")
+
+    supports = build_side_supports(litho)
+    if supports is not None:
+        # 板とは別シェルのまま足す。ここで merge_vertices してはいけない
+        # (シェルどうしがつながって非多様体になる)。
+        mesh = trimesh.util.concatenate([mesh, supports])
     return mesh
 
 
@@ -454,17 +626,20 @@ def generate_stl(image_path, output_path, width_mm=100.0, min_thickness=0.6,
                  max_thickness=3.0, samples=400, gamma=0.8, positive=False,
                  equalize=False, crop_box=None, auto_face=False,
                  face_margin=0.6, curve_deg=0.0, preview_path=None,
-                 verbose=True):
+                 verbose=True, side_supports=False):
     litho = build_lithophane(
         image_path, width_mm=width_mm, min_thickness=min_thickness,
         max_thickness=max_thickness, samples=samples, gamma=gamma,
         positive=positive, equalize=equalize, crop_box=crop_box,
         auto_face=auto_face, face_margin=face_margin, curve_deg=curve_deg,
+        side_supports=side_supports,
     )
 
     if verbose:
         for w in litho.warnings:
             print(w)
+        if side_supports and not litho.has_side_supports:
+            print("注意: 湾曲させた板は自立するため、サイドサポートは付けません。")
 
     if preview_path:
         save_preview_png(litho, preview_path)
@@ -493,6 +668,8 @@ def main():
                     help="横方向の分割数(精細さ↔ファイルサイズ)")
     ap.add_argument("--curve", type=float, default=0.0,
                     help="円弧状に湾曲させる中心角(度)。0で平板")
+    ap.add_argument("--side-supports", action="store_true",
+                    help="左右に折り取り式の揺れ止めフィンを付ける(平板のみ)")
     ap.add_argument("--gamma", type=float, default=0.8,
                     help="1未満で暗部の階調を強調")
     ap.add_argument("--positive", action="store_true",
@@ -534,7 +711,7 @@ def main():
         samples=args.samples, gamma=args.gamma, positive=args.positive,
         equalize=args.equalize, crop_box=crop_box, auto_face=auto_face,
         face_margin=args.face_margin, curve_deg=args.curve,
-        preview_path=args.preview,
+        preview_path=args.preview, side_supports=args.side_supports,
     )
     print(f"書き出し完了: {args.output}  "
           f"(三角形 {len(mesh.faces):,} / watertight={mesh.is_watertight})")

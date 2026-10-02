@@ -108,6 +108,28 @@ export function LithophaneParamPanel({
       </div>
 
       <div className="section">
+        <h3>印刷の安定化</h3>
+        <Toggle
+          label="サイドサポートを付ける"
+          desc={
+            curved
+              ? "湾曲させた板は自立するので付きません"
+              : "板の左右に折り取り式の揺れ止めフィンを立てます。細いタブだけでつながっているので、印刷後はフィンを倒せば外れます"
+          }
+          checked={params.side_supports && !curved}
+          disabled={curved}
+          onChange={(side_supports) => onChange({ side_supports })}
+        />
+        {params.side_supports && !curved && size ? (
+          <p className="muted" style={{ margin: "6px 0 0" }}>
+            フィン込みの外形は {size.outer_width_mm.toFixed(0)} ×{" "}
+            {size.outer_depth_mm.toFixed(0)}mm（幅 × 奥行き）。3Dタブで形を確認できます。
+            背の高い板はスライサーのブリムも併用すると確実です。
+          </p>
+        ) : null}
+      </div>
+
+      <div className="section">
         <h3>明暗</h3>
         <Slider
           label="ガンマ"

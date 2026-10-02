@@ -59,6 +59,8 @@ export interface LithophaneParams extends CommonParams {
   samples: number;
   curve: number;
   positive: boolean;
+  /** 立てて印刷するときの揺れ止め(左右の折り取り式フィン)。平板のときだけ付く。 */
+  side_supports: boolean;
 }
 
 /** keychain_stl.py のパラメータと1対1で対応する */

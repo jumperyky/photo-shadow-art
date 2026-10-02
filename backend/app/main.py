@@ -136,6 +136,7 @@ KEYCHAIN_DEFAULTS = {
 LITHOPHANE_DEFAULTS = {
     "width": 100.0, "min_thickness": 0.6, "max_thickness": 3.0,
     "samples": 400, "curve": 0.0, "gamma": 0.8, "positive": False,
+    "side_supports": False,
     "equalize": False, "auto_face": False, "face_margin": 0.6,
 }
 
@@ -262,9 +263,15 @@ def _build_lithophane(params, image_path: Path, samples: int):
             equalize=params.equalize,
             crop_box=crop_box,
             curve_deg=params.curve,
+            side_supports=params.side_supports,
         )
     except (ValueError, MemoryError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    if params.side_supports and not litho.has_side_supports:
+        notices.append(
+            "湾曲させた板はそれ自体が自立するため、サイドサポートは付けません。"
+        )
 
     return litho, crop_box, notices
 
