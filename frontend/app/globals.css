@@ -1,0 +1,928 @@
+:root {
+  --bg: #0e1116;
+  --bg-elev: #161b23;
+  --bg-elev-2: #1d242e;
+  --border: #2a3341;
+  --border-strong: #3a4553;
+  --text: #e7ecf3;
+  --text-dim: #97a3b4;
+  --text-faint: #6b7889;
+  --accent: #d8b478;
+  --accent-strong: #f0c98a;
+  --accent-ink: #1a1408;
+  --danger: #ff8a8a;
+  --warn: #ffcf70;
+  --ok: #7fd6a2;
+  --radius: 12px;
+  --radius-sm: 8px;
+  --shadow: 0 6px 24px rgba(0, 0, 0, 0.35);
+  --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", "Hiragino Sans",
+    "Noto Sans JP", "Yu Gothic UI", Meiryo, sans-serif;
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg: #f4f1ea;
+    --bg-elev: #ffffff;
+    --bg-elev-2: #faf8f4;
+    --border: #ddd6c9;
+    --border-strong: #c6bcaa;
+    --text: #1e2229;
+    --text-dim: #5c6672;
+    --text-faint: #8b95a3;
+    --accent: #8a6a2f;
+    --accent-strong: #6f5322;
+    --accent-ink: #fffaf0;
+    --danger: #b4342f;
+    --warn: #8a6410;
+    --ok: #1f7a4d;
+    --shadow: 0 4px 18px rgba(60, 50, 30, 0.12);
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  padding: 0;
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--sans);
+  font-size: 15px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+input,
+select {
+  font: inherit;
+  color: inherit;
+}
+
+/* ---------------------------------------------------------------- layout */
+.app {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.header {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  flex-wrap: wrap;
+  padding: 18px 24px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-elev);
+}
+
+.header h1 {
+  margin: 0;
+  font-size: 18px;
+  letter-spacing: 0.02em;
+}
+
+.header .sub {
+  color: var(--text-dim);
+  font-size: 13px;
+}
+
+.header .spacer {
+  flex: 1;
+}
+
+.workspace {
+  flex: 1;
+  display: grid;
+  gap: 18px;
+  padding: 18px 24px 40px;
+  grid-template-columns: minmax(280px, 340px) minmax(320px, 1fr) minmax(300px, 370px);
+  align-items: start;
+}
+
+@media (max-width: 1280px) {
+  .workspace {
+    grid-template-columns: minmax(280px, 1fr) minmax(280px, 1fr);
+  }
+  .workspace > .col-params {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 820px) {
+  .workspace {
+    grid-template-columns: 1fr;
+    padding: 14px;
+  }
+  .workspace > .col-params {
+    grid-column: auto;
+  }
+}
+
+.col {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+
+/* ----------------------------------------------------------------- panel */
+.panel {
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+
+.panel-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 14px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-elev-2);
+}
+
+.panel-head h2 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.panel-head .step {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-size: 11px;
+  font-weight: 700;
+  flex: none;
+}
+
+.panel-head .spacer {
+  flex: 1;
+}
+
+.panel-body {
+  padding: 14px;
+}
+
+.panel-body.flush {
+  padding: 0;
+}
+
+/* -------------------------------------------------------------- dropzone */
+.dropzone {
+  border: 2px dashed var(--border-strong);
+  border-radius: var(--radius-sm);
+  padding: 28px 16px;
+  text-align: center;
+  color: var(--text-dim);
+  background: var(--bg-elev-2);
+  transition: border-color 0.15s, background 0.15s;
+  cursor: pointer;
+}
+
+.dropzone:hover,
+.dropzone.over {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, var(--bg-elev-2));
+  color: var(--text);
+}
+
+.dropzone strong {
+  display: block;
+  color: var(--text);
+  font-size: 15px;
+  margin-bottom: 4px;
+}
+
+.dropzone .hint {
+  font-size: 12px;
+  color: var(--text-faint);
+  margin-top: 6px;
+}
+
+/* ------------------------------------------------------------------ crop */
+.crop-stage {
+  display: grid;
+  place-items: center;
+  padding: 10px;
+  background: var(--bg-elev-2);
+  min-height: 180px;
+}
+
+.crop-stage img {
+  max-height: 46vh;
+  max-width: 100%;
+  display: block;
+}
+
+/* 枠の中に重ねる出力形状。ドラッグの邪魔をしないよう当たり判定は切る。 */
+.crop-outline {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  overflow: visible;
+}
+
+.crop-outline-mask {
+  fill: rgba(8, 10, 14, 0.55);
+}
+
+.crop-outline-edge {
+  fill: none;
+  stroke: rgba(255, 255, 255, 0.9);
+  stroke-width: 1.5;
+  stroke-dasharray: 5 4;
+}
+
+.crop-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 12px 14px;
+  border-top: 1px solid var(--border);
+}
+
+/* --------------------------------------------------------------- preview */
+.preview-stage {
+  position: relative;
+  display: grid;
+  place-items: center;
+  min-height: 340px;
+  padding: 16px;
+  background: repeating-conic-gradient(
+      color-mix(in srgb, var(--border) 40%, transparent) 0% 25%,
+      transparent 0% 50%
+    )
+    50% / 20px 20px;
+  border-radius: var(--radius-sm);
+}
+
+.preview-stage img {
+  max-width: 100%;
+  max-height: 66vh;
+  border-radius: 4px;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.4);
+  display: block;
+}
+
+.preview-empty {
+  color: var(--text-faint);
+  text-align: center;
+  font-size: 14px;
+  max-width: 280px;
+}
+
+.preview-busy {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 11px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bg) 82%, transparent);
+  border: 1px solid var(--border);
+  font-size: 12px;
+  color: var(--text-dim);
+  backdrop-filter: blur(4px);
+}
+
+.spinner {
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--border-strong);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+  flex: none;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spinner {
+    animation-duration: 2s;
+  }
+}
+
+/* ------------------------------------------------------------------ chip */
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-top: 12px;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--bg-elev-2);
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.chip b {
+  color: var(--text);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.chip.over {
+  border-color: var(--warn);
+  color: var(--warn);
+}
+
+.chip.over b {
+  color: var(--warn);
+}
+
+/* --------------------------------------------------------------- message */
+.msg {
+  display: flex;
+  gap: 8px;
+  padding: 9px 12px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  line-height: 1.55;
+  border: 1px solid;
+  margin-top: 10px;
+}
+
+.msg.warn {
+  border-color: color-mix(in srgb, var(--warn) 45%, transparent);
+  background: color-mix(in srgb, var(--warn) 10%, transparent);
+  color: var(--warn);
+}
+
+.msg.info {
+  border-color: var(--border);
+  background: var(--bg-elev-2);
+  color: var(--text-dim);
+}
+
+.msg.error {
+  border-color: color-mix(in srgb, var(--danger) 50%, transparent);
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+  color: var(--danger);
+}
+
+.msg .icon {
+  flex: none;
+  font-weight: 700;
+}
+
+/* --------------------------------------------------------------- control */
+.section {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.section:last-child {
+  border-bottom: none;
+}
+
+.section > h3 {
+  margin: 0 0 10px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.field {
+  margin-bottom: 13px;
+}
+
+.field:last-child {
+  margin-bottom: 0;
+}
+
+.field-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 5px;
+}
+
+.field-head label {
+  font-size: 13px;
+  color: var(--text-dim);
+  flex: 1;
+  min-width: 0;
+}
+
+.field-head .unit {
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+.num-input {
+  width: 76px;
+  padding: 3px 7px;
+  text-align: right;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-family: var(--mono);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.num-input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  border-color: var(--accent);
+}
+
+input[type="range"] {
+  width: 100%;
+  height: 20px;
+  margin: 0;
+  accent-color: var(--accent);
+  background: transparent;
+  cursor: pointer;
+}
+
+.seg {
+  display: flex;
+  gap: 4px;
+  padding: 3px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.seg button {
+  flex: 1;
+  padding: 6px 4px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 12.5px;
+  transition: background 0.12s, color 0.12s;
+}
+
+.seg button:hover {
+  color: var(--text);
+}
+
+.seg button[aria-pressed="true"] {
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-weight: 600;
+}
+
+.toggle {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 7px 0;
+  cursor: pointer;
+  font-size: 13.5px;
+}
+
+.toggle input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent);
+  cursor: pointer;
+  flex: none;
+}
+
+.toggle .desc {
+  display: block;
+  font-size: 11.5px;
+  color: var(--text-faint);
+  line-height: 1.4;
+}
+
+select.select {
+  width: 100%;
+  padding: 7px 9px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+input.text {
+  width: 100%;
+  padding: 7px 9px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+input.text:focus-visible,
+select.select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* ---------------------------------------------------------------- button */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 8px 14px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-strong);
+  background: var(--bg-elev-2);
+  color: var(--text);
+  font-size: 13.5px;
+  transition: border-color 0.12s, background 0.12s, opacity 0.12s;
+}
+
+.btn:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+.btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.btn.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+  font-weight: 700;
+}
+
+.btn.primary:hover:not(:disabled) {
+  background: var(--accent-strong);
+  border-color: var(--accent-strong);
+}
+
+.btn.block {
+  width: 100%;
+  padding: 11px 14px;
+  font-size: 14.5px;
+}
+
+.btn.small {
+  padding: 5px 10px;
+  font-size: 12.5px;
+}
+
+.btn:focus-visible,
+.seg button:focus-visible,
+.dropzone:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.row > * {
+  min-width: 0;
+}
+
+.muted {
+  color: var(--text-faint);
+  font-size: 12px;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* react-image-crop のテーマ調整 */
+.ReactCrop__crop-selection {
+  border-radius: 2px;
+}
+
+.muted.over-limit {
+  color: var(--warn);
+}
+
+/* ------------------------------------------------------------- mode bar */
+.mode-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 14px 24px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-elev-2);
+}
+
+@media (max-width: 820px) {
+  .mode-row {
+    padding: 12px 14px;
+  }
+}
+
+.mode-row .mode-step {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-size: 11px;
+  font-weight: 700;
+  flex: none;
+}
+
+.mode-row .mode-label {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  margin-right: 4px;
+}
+
+.mode-bar {
+  display: flex;
+  gap: 10px;
+  flex: 1;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.mode-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  flex: 1 1 300px;
+  min-width: 0;
+  padding: 11px 14px;
+  text-align: left;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--bg-elev);
+  color: var(--text-dim);
+  transition: border-color 0.14s, background 0.14s, color 0.14s;
+}
+
+.mode-card:hover {
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+
+.mode-card.active {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, var(--bg-elev));
+  color: var(--text);
+}
+
+.mode-card:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.mode-card .mode-icon {
+  flex: none;
+  display: grid;
+  place-items: center;
+  color: var(--text-faint);
+  transition: color 0.14s;
+}
+
+.mode-card.active .mode-icon {
+  color: var(--accent);
+}
+
+.mode-card .mode-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.mode-card .mode-title {
+  font-size: 14.5px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.mode-card .mode-desc {
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--text-faint);
+}
+
+/* リソフェインのプレビューは「暗い部屋で裏から照らした」見え方なので、
+   背景を市松模様ではなく暗い面にして実際の見え方に近づける */
+.preview-stage.backlit {
+  background: #0a0a0c;
+  border: 1px solid var(--border);
+}
+
+.preview-stage.backlit img {
+  /* 暗部が背景と同化して板の輪郭が分からなくなるので、うっすら縁を出す */
+  outline: 1px solid rgba(255, 226, 170, 0.22);
+  outline-offset: -1px;
+  box-shadow: 0 0 60px rgba(255, 226, 170, 0.18);
+}
+
+.preview-caption {
+  margin: 8px 0 0;
+}
+
+/* --------------------------------------------------------- 3D ビューア */
+/* タブとフィラメント色を1行に並べる。狭いときは折り返す。 */
+.preview-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.view-tabs {
+  display: inline-flex;
+  gap: 3px;
+  padding: 3px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.view-tabs button {
+  padding: 5px 14px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 12.5px;
+  transition: background 0.12s, color 0.12s;
+}
+
+.view-tabs button:hover {
+  color: var(--text);
+}
+
+.view-tabs button[aria-selected="true"] {
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-weight: 600;
+}
+
+.view-tabs button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* --------------------------------------------------- フィラメントの色選択 */
+.filament-picker {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex-wrap: wrap;
+}
+
+.filament-label {
+  font-size: 12px;
+  color: var(--text-dim);
+  margin-right: 2px;
+}
+
+.filament-swatch {
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border-radius: 50%;
+  /* 白いフィラメントが背景に溶けないよう、常に縁取りを付ける */
+  border: 1px solid rgba(128, 128, 128, 0.55);
+  cursor: pointer;
+  transition: transform 0.12s, box-shadow 0.12s;
+}
+
+.filament-swatch:hover {
+  transform: scale(1.15);
+}
+
+.filament-swatch[aria-checked="true"] {
+  /* 内側の隙間で下地を覗かせてから外周のリングを描く(色に依存しない選択表示) */
+  box-shadow:
+    0 0 0 2px var(--bg-elev-1),
+    0 0 0 4px var(--accent);
+}
+
+.filament-swatch:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
+.viewer-stage {
+  position: relative;
+  min-height: 340px;
+  height: 52vh;
+  max-height: 640px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
+
+/*
+ * 3Dモデルの背景。スタジオの背景紙のような上下グラデーション。
+ * ページのテーマではなくフィラメントの色で明暗を決める(2Dプレビューの
+ * 背景と同じ考え方)。黒い作品を暗い背景に置くと形が読めなくなるため。
+ */
+.viewer-stage.on-light {
+  background: radial-gradient(120% 90% at 50% 8%, #f6f1e7 0%, #d9d2c4 78%);
+}
+
+.viewer-stage.on-dark {
+  background: radial-gradient(120% 90% at 50% 8%, #2b333f 0%, #0e1116 78%);
+}
+
+.viewer-canvas {
+  position: absolute;
+  inset: 0;
+}
+
+.viewer-canvas canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  /* OrbitControls のドラッグ中にテキスト選択やスクロールが起きないように */
+  touch-action: none;
+  cursor: grab;
+}
+
+.viewer-canvas canvas:active {
+  cursor: grabbing;
+}
+
+/*
+ * 背景の明暗はフィラメントの色で入れ替わるので、上に乗る文字は
+ * どちらでも読めるよう不透明の下地を敷く(ヒントと同じ扱い)。
+ */
+.viewer-overlay {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  padding: 8px 14px;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--bg) 88%, transparent);
+  border: 1px solid var(--border);
+  backdrop-filter: blur(4px);
+  pointer-events: none;
+  margin: 0;
+}
+
+.viewer-hint {
+  position: absolute;
+  left: 12px;
+  bottom: 12px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bg) 78%, transparent);
+  border: 1px solid var(--border);
+  font-size: 11.5px;
+  color: var(--text-faint);
+  pointer-events: none;
+  backdrop-filter: blur(4px);
+}
