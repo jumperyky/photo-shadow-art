@@ -61,6 +61,8 @@ export interface LithophaneParams extends CommonParams {
   positive: boolean;
   /** 立てて印刷するときの揺れ止め(左右の折り取り式フィン)。平板のときだけ付く。 */
   side_supports: boolean;
+  /** ノズル径。形状は変えず、格子がノズルより粗いときに分割数が引き上げられる。 */
+  nozzle: number;
 }
 
 /** keychain_stl.py のパラメータと1対1で対応する */
@@ -74,7 +76,7 @@ export interface KeychainParams extends CommonParams, ShapeParams {
   hole_diameter: number;
   ring_margin: number;
   samples: number;
-  /** ノズル径。ジオメトリには影響せず、印刷できる解像度の判定にだけ使う。 */
+  /** ノズル径。形状は変えず、解像度の判定と分割数の引き上げに使う。 */
   nozzle: number;
   positive: boolean;
 }
@@ -95,7 +97,10 @@ export interface SizeInfo {
   grid: string | null;
   face_count: number | null;
   radius_mm: number | null;
-  // キーホルダー専用
+  // リソフェイン・キーホルダー共通
+  /** 実際に使われる分割数。ノズル径に合わせて指定値より引き上げられることがある。 */
+  samples_used: number | null;
+  // キーホルダー専用(printable_px と grid_px はリソフェインでも埋まる)
   frame_thickness_mm: number | null;
   well_depth_mm: number | null;
   hole_diameter_mm: number | null;

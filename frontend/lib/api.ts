@@ -116,6 +116,7 @@ function requestBody(
       curve: litho.curve,
       positive: litho.positive,
       side_supports: litho.side_supports,
+      nozzle: litho.nozzle,
     };
   }
 

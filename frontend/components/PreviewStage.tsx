@@ -185,6 +185,11 @@ export function PreviewStage({
                   格子<b>{size.grid}</b>
                 </span>
               ) : null}
+              {size.printable_px ? (
+                <span className="chip">
+                  印刷解像度<b>約 {size.printable_px}px</b>
+                </span>
+              ) : null}
               {size.face_count ? (
                 <span className="chip">
                   三角形<b>{(size.face_count / 1000).toFixed(0)}k</b>

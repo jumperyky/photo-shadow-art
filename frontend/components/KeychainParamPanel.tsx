@@ -1,6 +1,7 @@
 "use client";
 
 import { Message, Segmented, Slider, Toggle } from "./Controls";
+import { NozzlePicker } from "./NozzlePicker";
 import { SHAPE_LABELS } from "@/lib/defaults";
 import type { KeychainParams, ShapeName, SizeInfo } from "@/lib/types";
 
@@ -14,6 +15,7 @@ import type { KeychainParams, ShapeName, SizeInfo } from "@/lib/types";
 export function KeychainParamPanel({
   params,
   onChange,
+  onNozzleChange,
   onReset,
   size,
   faceAvailable,
@@ -23,6 +25,8 @@ export function KeychainParamPanel({
 }: {
   params: KeychainParams;
   onChange: (patch: Partial<KeychainParams>) => void;
+  /** ノズル径はプリンタ側の設定なので、モードをまたいで共有する */
+  onNozzleChange: (nozzle: number) => void;
   onReset: () => void;
   size: SizeInfo | null;
   faceAvailable: boolean;
@@ -101,7 +105,7 @@ export function KeychainParamPanel({
           help={
             size?.printable_px
               ? `写真が入る範囲。印刷できる横解像度は約${size.printable_px}px 相当です`
-              : "写真が入る範囲。0.4mmノズルなら50mm以上を推奨します"
+              : "写真が入る範囲。小さすぎると顔の細部が潰れます（目安は警告で出ます）"
           }
         />
         <Slider
@@ -238,25 +242,15 @@ export function KeychainParamPanel({
               : "多いほど滑らかですがファイルも大きくなります"
           }
         />
-        <Slider
-          label="ノズル径"
+        <NozzlePicker
           value={params.nozzle}
-          onChange={(nozzle) => onChange({ nozzle })}
-          min={0.2}
-          max={0.8}
-          step={0.05}
-          hardMin={0.1}
-          hardMax={2}
-          decimals={2}
-          help="形状には影響しません。印刷できる解像度の判定にだけ使います"
+          onChange={onNozzleChange}
+          samples={params.samples}
+          size={size}
         />
-        {size?.printable_px && size?.grid_px ? (
+        {size?.printable_px && size?.grid_px && size.grid_px > size.printable_px * 2 ? (
           <p className="muted" style={{ margin: "-4px 0 10px" }}>
-            印刷できる横解像度 <b>約 {size.printable_px}px</b>
-            （縦はレイヤー高で決まるのでこれよりずっと細かくなります）。
-            {size.grid_px > size.printable_px * 2
-              ? "格子はすでに十分細かいので、分割数を上げてもファイルが重くなるだけです。"
-              : null}
+            格子はすでに十分細かいので、分割数を上げてもファイルが重くなるだけです。
           </p>
         ) : null}
       </div>

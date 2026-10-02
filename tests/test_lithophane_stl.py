@@ -339,6 +339,68 @@ def test_convex_prism_faces_outward_either_way_round():
 
 
 # ---------------------------------------------------------------------------
+# ノズル径
+# ---------------------------------------------------------------------------
+def test_samples_follow_the_nozzle():
+    """格子がノズルより粗くならないよう引き上げ、細かいぶんには触らないこと"""
+    # 0.4mm・幅100mm は 250 で足りるので、既定の 400 はそのまま(下げない)
+    assert lp.samples_for_nozzle(400, 100.0, 0.4) == 400
+    # 0.2mm に替えると 500 必要
+    assert lp.samples_for_nozzle(400, 100.0, 0.2) == 500
+    assert lp.samples_for_nozzle(100, 100.0, 0.4) == 250
+    # すでに足りていれば変えない
+    assert lp.samples_for_nozzle(800, 100.0, 0.2) == 800
+    # 浮動小数の誤差で1つ多くならない(50 / 0.4 = 125 ちょうど)
+    assert lp.samples_needed_for_nozzle(50.0, 0.4) == 125
+
+
+def test_samples_are_not_raised_past_the_cap():
+    """勝手に100MB級のSTLを作らないこと。超えるぶんは警告で知らせる。"""
+    assert lp.samples_needed_for_nozzle(200.0, 0.2) == 1000
+    assert lp.samples_for_nozzle(400, 200.0, 0.2) == lp.AUTO_SAMPLES_CAP
+    # 利用者が自分で上げたぶんは尊重する
+    assert lp.samples_for_nozzle(1000, 200.0, 0.2) == 1000
+
+    lit = lp.build_lithophane(ramp_image(), width_mm=200, nozzle=0.2,
+                              samples=lp.AUTO_SAMPLES_CAP)
+    assert any("ノズル径" in w for w in lit.warnings), lit.warnings
+
+
+def test_fitted_samples_leave_no_grid_warning():
+    for width, nozzle in ((100.0, 0.4), (100.0, 0.2), (60.0, 0.2), (240.0, 0.4)):
+        samples = lp.samples_for_nozzle(100, width, nozzle)
+        lit = lp.build_lithophane(ramp_image(), width_mm=width, nozzle=nozzle,
+                                  samples=samples)
+        assert not any("ノズル径" in w for w in lit.warnings), (width, nozzle)
+        assert lit.width_mm / lit.samples_x <= nozzle + 1e-9
+
+    coarse = lp.build_lithophane(ramp_image(), width_mm=100, nozzle=0.2,
+                                 samples=400)
+    assert any("ノズル径" in w for w in coarse.warnings)
+
+
+def test_nozzle_does_not_change_the_shape():
+    """ノズル径は判定にだけ使う。同じ分割数なら厚みマップは完全に同じ。"""
+    a = lp.build_lithophane(SAMPLE, width_mm=100, samples=80, nozzle=0.4)
+    b = lp.build_lithophane(SAMPLE, width_mm=100, samples=80, nozzle=0.2)
+    assert np.array_equal(a.thickness, b.thickness)
+    assert a.footprint() == b.footprint()
+    assert (a.printable_px, b.printable_px) == (250, 500)
+
+
+def test_generate_stl_fits_samples_to_the_nozzle():
+    """CLI経由では、細いノズルを指定すると格子が自動で細かくなること"""
+    kw = dict(width_mm=30.0, samples=100, verbose=False)
+    coarse = lp.generate_stl(SAMPLE, None, nozzle=0.4, **kw)
+    fine = lp.generate_stl(SAMPLE, None, nozzle=0.2, **kw)
+    src_w, src_h = lp.open_image(SAMPLE).size
+    assert len(coarse.faces) == lp.face_count_for(
+        *lp.grid_shape(src_w, src_h, 100))
+    assert len(fine.faces) == lp.face_count_for(
+        *lp.grid_shape(src_w, src_h, 150))
+
+
+# ---------------------------------------------------------------------------
 # 警告
 # ---------------------------------------------------------------------------
 def test_thickness_warnings():

@@ -51,6 +51,15 @@ FACE_COUNT_WARN = 2_000_000
 # 分割数の上限(横方向)。縦方向は縦長画像のためにこの4倍まで許す。
 DEFAULT_MAX_SAMPLES = 1200
 
+# --- ノズル径 ---------------------------------------------------------------
+# 立てて印刷するので、横方向に出せる細かさは押出し幅(≒ノズル径)で頭打ちになる。
+# ノズル径は形状そのものは変えず、「格子がノズルより粗くならないように
+# 分割数を引き上げる」ことと、印刷できる解像度の表示・警告にだけ使う。
+DEFAULT_NOZZLE_MM = 0.4
+# 自動で引き上げる分割数の上限。これ以上はSTLが100MB級になるので、
+# 必要なら利用者が自分で上げる(勝手に重いファイルを作らない)。
+AUTO_SAMPLES_CAP = 600
+
 # --- サイドサポート(立てて印刷するときの揺れ止め) ---------------------------
 # 板の左右に、板と直交する三角形のフィンを立てる。フィンは板から SUPPORT_GAP
 # だけ離し、細いタブだけでつなぐので、印刷後はフィンを倒せばタブが折れて外れる。
@@ -82,6 +91,38 @@ def grid_shape(src_w, src_h, samples, max_samples=DEFAULT_MAX_SAMPLES):
     return nx, nz
 
 
+def samples_needed_for_nozzle(span_mm, nozzle):
+    """格子の間隔がノズル径以下になる最小の分割数(=印刷できる横解像度)"""
+    return max(8, int(math.ceil(span_mm / nozzle - 1e-9)))
+
+
+def samples_for_nozzle(samples, span_mm, nozzle, cap=AUTO_SAMPLES_CAP):
+    """
+    ノズル径に合わせた分割数を返す。
+
+    指定された分割数が、ノズルで出せる細かさ(span_mm / nozzle)に届いて
+    いなければそこまで引き上げる。細いノズルに替えたのに格子が粗いままだと、
+    ノズルの細かさが写真に反映されない。下げることはしない(縦方向はレイヤー高
+    で決まり、ノズルより細かい格子にも意味があるため)。
+    引き上げるのは cap まで。それを超えるぶんは警告だけ出して利用者に任せる。
+    """
+    need = min(samples_needed_for_nozzle(span_mm, nozzle), int(cap))
+    return max(int(samples), need)
+
+
+def check_grid_vs_nozzle(span_mm, grid_px, nozzle):
+    """格子がノズル径より粗いときの警告(リソフェイン・キーホルダー共通)"""
+    if grid_px <= 0 or span_mm / grid_px <= nozzle + 1e-9:
+        return []
+    return [
+        f"警告: 分割数が粗く、格子の間隔 {span_mm / grid_px:.2f}mm が"
+        f"ノズル径 {nozzle}mm を上回っています。分割数を上げると精細になります"
+        f"(ノズルの細かさを使い切る目安は横"
+        f"{samples_needed_for_nozzle(span_mm, nozzle)}列。"
+        f"自動で引き上げるのは分割数{AUTO_SAMPLES_CAP}までです)。"
+    ]
+
+
 def face_count_for(nx, nz):
     """build_mesh() が生成する三角形の数(格子サイズから決まる)"""
     return 4 * (nx - 1) * (nz - 1) + 4 * ((nx - 1) + (nz - 1))
@@ -102,6 +143,7 @@ class Lithophane:
     src_size: tuple = (1, 1)    # サンプリング元画像の (幅, 高さ) px
     warnings: list = field(default_factory=list)
     side_supports: bool = False  # 左右に揺れ止めのフィンを付ける(平板のみ)
+    nozzle: float = DEFAULT_NOZZLE_MM  # 形状には影響しない(解像度の判定用)
 
     @property
     def samples_x(self) -> int:
@@ -130,6 +172,14 @@ class Lithophane:
     def face_count(self) -> int:
         """build_mesh() が生成する三角形の数"""
         return face_count_for(self.samples_x, self.samples_z)
+
+    @property
+    def printable_px(self) -> int:
+        """
+        実際に印刷できる横方向の解像度。立てて印刷するので、横は押出し幅
+        (≒ノズル径)で決まる。格子をこれより細かくしても横方向は増えない。
+        """
+        return int(self.width_mm / self.nozzle + 1e-9)
 
     @property
     def has_side_supports(self) -> bool:
@@ -200,7 +250,8 @@ def build_lithophane(image, width_mm=100.0, min_thickness=0.6,
                      max_thickness=3.0, samples=400, gamma=0.8,
                      positive=False, equalize=False, crop_box=None,
                      auto_face=False, face_margin=0.6, curve_deg=0.0,
-                     max_samples=1200, side_supports=False):
+                     max_samples=1200, side_supports=False,
+                     nozzle=DEFAULT_NOZZLE_MM):
     """
     画像から厚みマップを生成する。メッシュ化を伴わないので、
     プレビュー用途ではこれだけを呼べばよい。
@@ -211,6 +262,10 @@ def build_lithophane(image, width_mm=100.0, min_thickness=0.6,
     positive:  True で「明るいところを厚く」する(レリーフ向き)。
                既定は False =「暗いところを厚く」(裏から照らす通常のリソフェイン)。
     side_supports: True で左右に折り取り式の揺れ止めフィンを付ける(平板のみ)。
+    nozzle:    ノズル径(mm)。形状は変えず、解像度の判定と警告にだけ使う。
+               分割数をノズルに合わせて引き上げるのは呼び出し側の仕事
+               (samples_for_nozzle)。ここで勝手に変えると、プレビュー用に
+               粗くした格子まで引き上げてしまう。
     """
     if max_thickness < min_thickness:
         raise ValueError("最大厚みは最小厚み以上にしてください。")
@@ -249,10 +304,13 @@ def build_lithophane(image, width_mm=100.0, min_thickness=0.6,
         src_size=(src_w, src_h),
         warnings=warnings,
         side_supports=bool(side_supports),
+        nozzle=float(nozzle),
     )
 
     fw, fh, fd = litho.footprint()
     warnings += check_print_size(fw, fh, fd)
+
+    warnings += check_grid_vs_nozzle(litho.width_mm, litho.samples_x, nozzle)
 
     if litho.face_count > FACE_COUNT_WARN:
         warnings.append(
@@ -626,13 +684,20 @@ def generate_stl(image_path, output_path, width_mm=100.0, min_thickness=0.6,
                  max_thickness=3.0, samples=400, gamma=0.8, positive=False,
                  equalize=False, crop_box=None, auto_face=False,
                  face_margin=0.6, curve_deg=0.0, preview_path=None,
-                 verbose=True, side_supports=False):
+                 verbose=True, side_supports=False,
+                 nozzle=DEFAULT_NOZZLE_MM):
+    fitted = samples_for_nozzle(samples, width_mm, nozzle)
+    if verbose and fitted != samples:
+        print(f"注意: ノズル径 {nozzle}mm に合わせて、分割数を "
+              f"{samples} から {fitted} に引き上げました。")
+    samples = fitted
+
     litho = build_lithophane(
         image_path, width_mm=width_mm, min_thickness=min_thickness,
         max_thickness=max_thickness, samples=samples, gamma=gamma,
         positive=positive, equalize=equalize, crop_box=crop_box,
         auto_face=auto_face, face_margin=face_margin, curve_deg=curve_deg,
-        side_supports=side_supports,
+        side_supports=side_supports, nozzle=nozzle,
     )
 
     if verbose:
@@ -666,6 +731,9 @@ def main():
                     help="暗部の厚み(mm)")
     ap.add_argument("--samples", type=int, default=400,
                     help="横方向の分割数(精細さ↔ファイルサイズ)")
+    ap.add_argument("--nozzle", type=float, default=DEFAULT_NOZZLE_MM,
+                    help="ノズル径(mm)。形状は変えず、格子がノズルより粗いときに"
+                         "分割数を引き上げる(0.2 なら幅100mmで500)")
     ap.add_argument("--curve", type=float, default=0.0,
                     help="円弧状に湾曲させる中心角(度)。0で平板")
     ap.add_argument("--side-supports", action="store_true",
@@ -712,6 +780,7 @@ def main():
         equalize=args.equalize, crop_box=crop_box, auto_face=auto_face,
         face_margin=args.face_margin, curve_deg=args.curve,
         preview_path=args.preview, side_supports=args.side_supports,
+        nozzle=args.nozzle,
     )
     print(f"書き出し完了: {args.output}  "
           f"(三角形 {len(mesh.faces):,} / watertight={mesh.is_watertight})")

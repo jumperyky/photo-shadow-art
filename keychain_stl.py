@@ -58,7 +58,7 @@ Y_MARGIN_MM = 1.0
 PAD_MIN_MM = 1.0
 
 # --- 警告のしきい値 ---------------------------------------------------------
-DEFAULT_NOZZLE_MM = 0.4       # 一般的なノズル径
+DEFAULT_NOZZLE_MM = lp.DEFAULT_NOZZLE_MM   # 一般的なノズル径
 # 印刷できる横解像度の下限。これを下回ると顔の細部が潰れる。
 # 0.4mmノズルなら 45mm 相当。ノズルを細くすれば同じpx数を小さいサイズで得られる。
 MIN_PRINTABLE_PX = 110
@@ -240,12 +240,7 @@ def check_keychain_safety(design_width_mm, grid_px, printable_px, nozzle,
             f"(立てて印刷するため横方向はノズル径で頭打ちになります)。"
         )
 
-    if grid_px > 0 and design_width_mm / grid_px > nozzle:
-        warnings.append(
-            f"警告: 分割数が粗く、格子の間隔 "
-            f"{design_width_mm / grid_px:.2f}mm がノズル径 {nozzle}mm を"
-            f"上回っています。分割数を上げると精細になります。"
-        )
+    warnings += lp.check_grid_vs_nozzle(design_width_mm, grid_px, nozzle)
 
     well = frame_thickness - max_thickness
     if well <= 0:
@@ -280,6 +275,26 @@ def check_keychain_safety(design_width_mm, grid_px, printable_px, nozzle,
 # ---------------------------------------------------------------------------
 # 生成
 # ---------------------------------------------------------------------------
+def samples_for_nozzle(samples, nozzle, shape="circle", diameter=50.0,
+                       aspect=1.0, frame_width=3.0, hole_diameter=3.5,
+                       ring_margin=2.5):
+    """
+    ノズル径に合わせた分割数を返す(lithophane_stl.samples_for_nozzle の
+    キーホルダー版)。格子は画像部ではなく、枠とパディングを含む外形bboxに
+    張るので、そのぶん広い幅で必要数を数える。
+    """
+    if shape not in ("square", "rectangle"):
+        aspect = 1.0
+    body = build_body(shape, float(diameter) / 2.0, aspect, frame_width,
+                      hole_diameter, ring_margin)
+    bminx, _bminy, bmaxx, _bmaxy = body.body.bounds
+    # build_keychain のパディングは3セルぶん。必要数ちょうどのとき1セル≒ノズル径。
+    # 列数の丸めで間隔がわずかに上回らないよう、2セルぶん余裕を見る。
+    pad = max(PAD_MIN_MM, 3.0 * nozzle)
+    span = (bmaxx - bminx) + 2.0 * pad + 2.0 * nozzle
+    return lp.samples_for_nozzle(samples, span, nozzle)
+
+
 def build_keychain(image, shape="circle", diameter=50.0, aspect=1.0,
                    frame_width=3.0, min_thickness=0.6, max_thickness=2.4,
                    well_depth=0.6, frame_thickness=None,
@@ -518,6 +533,15 @@ def generate_stl(image_path, output_path, shape="circle", diameter=50.0,
                  equalize=False, crop_box=None, auto_face=False,
                  face_margin=0.6, nozzle=DEFAULT_NOZZLE_MM,
                  preview_path=None, verbose=True):
+    fitted = samples_for_nozzle(
+        samples, nozzle, shape=shape, diameter=diameter, aspect=aspect,
+        frame_width=frame_width, hole_diameter=hole_diameter,
+        ring_margin=ring_margin)
+    if verbose and fitted != samples:
+        print(f"注意: ノズル径 {nozzle}mm に合わせて、分割数を "
+              f"{samples} から {fitted} に引き上げました。")
+    samples = fitted
+
     kc = build_keychain(
         image_path, shape=shape, diameter=diameter, aspect=aspect,
         frame_width=frame_width, min_thickness=min_thickness,

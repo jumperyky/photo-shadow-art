@@ -136,7 +136,7 @@ KEYCHAIN_DEFAULTS = {
 LITHOPHANE_DEFAULTS = {
     "width": 100.0, "min_thickness": 0.6, "max_thickness": 3.0,
     "samples": 400, "curve": 0.0, "gamma": 0.8, "positive": False,
-    "side_supports": False,
+    "side_supports": False, "nozzle": 0.4,
     "equalize": False, "auto_face": False, "face_margin": 0.6,
 }
 
@@ -264,6 +264,7 @@ def _build_lithophane(params, image_path: Path, samples: int):
             crop_box=crop_box,
             curve_deg=params.curve,
             side_supports=params.side_supports,
+            nozzle=params.nozzle,
         )
     except (ValueError, MemoryError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -274,6 +275,14 @@ def _build_lithophane(params, image_path: Path, samples: int):
         )
 
     return litho, crop_box, notices
+
+
+def _litho_samples(params) -> int:
+    """
+    実際に使う分割数。ノズル径で出せる細かさに届いていなければ引き上げる。
+    出力品質の倍率はこの値に掛ける(引き上げたあとでもドラフトは半分になる)。
+    """
+    return lp.samples_for_nozzle(params.samples, params.width, params.nozzle)
 
 
 def _lithophane_size(litho) -> SizeInfo:
@@ -290,6 +299,8 @@ def _lithophane_size(litho) -> SizeInfo:
         grid=f"{litho.samples_x} x {litho.samples_z}",
         face_count=litho.face_count,
         radius_mm=round(litho.radius_mm, 2) if litho.curve_deg > 0 else None,
+        printable_px=litho.printable_px,
+        grid_px=litho.samples_x,
     )
 
 
@@ -523,6 +534,16 @@ def _litho_tint(fg) -> tuple:
     return tuple(round(h * light / 255) for h, light in zip(hue, LITHO_LIGHT))
 
 
+def _keychain_samples(params) -> int:
+    """実際に使う分割数(リソフェインの _litho_samples と同じ役割)"""
+    return kcm.samples_for_nozzle(
+        params.samples, params.nozzle,
+        shape=params.effective_shape, diameter=params.diameter,
+        aspect=params.effective_aspect, frame_width=params.frame_width,
+        hole_diameter=params.hole_diameter, ring_margin=params.ring_margin,
+    )
+
+
 def _build_keychain(params, image_path: Path, samples: int):
     """キーホルダーを組む。クロップはシャドウアートと同じく形状に合わせる。"""
     crop_box, notices = _resolve_crop(
@@ -592,12 +613,13 @@ def preview(req: AnyPreviewRequest = Body(..., discriminator="mode")):
     elif req.mode == "keychain":
         # プレビューはブーリアンを通さない(2D描画だけ)ので軽い
         kc, crop_box, notices = _build_keychain(
-            req, path, min(req.samples, req.preview_size))
+            req, path, min(_keychain_samples(req), req.preview_size))
         image = kcm.render_preview_image(
             kc, size=req.preview_size, tint=_litho_tint(filament),
             frame_color=filament, bg=_preview_backdrop(filament))
         warnings = kc.warnings
         size = _keychain_size(kc)
+        size.samples_used = _keychain_samples(req)
         if _luma(filament) < LITHO_DARK_LUMA:
             notices.append(
                 "暗い色のフィラメントは光をほとんど通しません。"
@@ -606,7 +628,7 @@ def preview(req: AnyPreviewRequest = Body(..., discriminator="mode")):
             )
     else:
         # プレビューは分割数を抑えて高速に(見た目の階調は分割数に依存しない)
-        samples = min(req.samples, req.preview_size)
+        samples = min(_litho_samples(req), req.preview_size)
         litho, crop_box, notices = _build_lithophane(req, path, samples)
         image = lp.render_preview_image(
             litho, size=req.preview_size, tint=_litho_tint(filament))
@@ -618,10 +640,14 @@ def preview(req: AnyPreviewRequest = Body(..., discriminator="mode")):
             )
         # 警告は実際の分割数(=ユーザー指定)で出したいので作り直す
         warnings = [w for w in litho.warnings if "分割数" not in w]
+        nx, nz = litho.grid_for_samples(_litho_samples(req))
+        warnings += lp.check_grid_vs_nozzle(litho.width_mm, nx, req.nozzle)
         warnings += _litho_face_count_warning(req, litho)
         size = _lithophane_size(litho)
-        size.grid = _projected_grid(req, litho)
+        size.grid = f"{nx} x {nz}"
+        size.grid_px = nx
         size.face_count = _projected_face_count(req, litho)
+        size.samples_used = _litho_samples(req)
 
     return PreviewResponse(
         mode=req.mode,
@@ -634,14 +660,9 @@ def preview(req: AnyPreviewRequest = Body(..., discriminator="mode")):
     )
 
 
-def _projected_grid(req: LithophanePreviewRequest, litho) -> str:
-    """プレビューは粗く作るので、STL出力時の格子サイズを計算して見せる"""
-    nx, nz = litho.grid_for_samples(req.samples)
-    return f"{nx} x {nz}"
-
-
 def _projected_face_count(req: LithophanePreviewRequest, litho) -> int:
-    return lp.face_count_for(*litho.grid_for_samples(req.samples))
+    """プレビューは粗く作るので、STL出力時の格子で三角形数を計算して見せる"""
+    return lp.face_count_for(*litho.grid_for_samples(_litho_samples(req)))
 
 
 def _litho_face_count_warning(req, litho):
@@ -701,7 +722,7 @@ def make_stl(req: AnyStlRequest = Body(..., discriminator="mode")):
 
     if req.mode == "keychain":
         scale = KEYCHAIN_QUALITY_SCALE[req.quality]
-        samples = int(max(8, min(800, round(req.samples * scale))))
+        samples = int(max(8, min(800, round(_keychain_samples(req) * scale))))
         kc, _crop, _notices = _build_keychain(req, path, samples)
         try:
             mesh = kcm.build_mesh(kc)
@@ -713,7 +734,7 @@ def make_stl(req: AnyStlRequest = Body(..., discriminator="mode")):
 
     if req.mode == "lithophane":
         scale = LITHO_QUALITY_SCALE[req.quality]
-        samples = int(max(8, min(1200, round(req.samples * scale))))
+        samples = int(max(8, min(1200, round(_litho_samples(req) * scale))))
         litho, _crop, _notices = _build_lithophane(req, path, samples)
         try:
             mesh = lp.build_mesh(litho)
