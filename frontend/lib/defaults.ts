@@ -38,6 +38,7 @@ export const DEFAULT_LITHOPHANE: LithophaneParams = {
   gamma: 0.8,
   positive: false,
   side_supports: false,
+  nozzle: 0.4,
   equalize: false,
   auto_face: false,
   face_margin: 0.6,
@@ -63,6 +64,9 @@ export const DEFAULT_KEYCHAIN: KeychainParams = {
   auto_face: false,
   face_margin: 0.6,
 };
+
+/** 選べるノズル径(mm)。リソフェインとキーホルダーで共通。 */
+export const NOZZLE_OPTIONS = [0.4, 0.2];
 
 /** プリンタの最大造形サイズ(mm)。ここまでは警告なしで指定できる。 */
 export const MAX_PRINT_SIZE_MM = 1800;

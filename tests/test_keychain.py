@@ -207,6 +207,31 @@ def test_fine_nozzle_lifts_the_size_warning():
     assert not any("解像度" in w for w in fine.warnings), fine.warnings
 
 
+def test_samples_follow_the_nozzle():
+    """
+    細いノズルで大きめに作ると既定の分割数では格子が粗くなる。
+    samples_for_nozzle の値で作れば「分割数が粗い」警告が出ないこと。
+    """
+    for shape in ("circle", "square", "hexagon"):
+        for diameter in (50.0, 80.0, 100.0):
+            for nozzle in (0.4, 0.2):
+                kw = dict(shape=shape, diameter=diameter, nozzle=nozzle)
+                samples = kc.samples_for_nozzle(320, **kw)
+                assert samples >= 320, "分割数を下げてはいけない"
+                k = kc.build_keychain(SAMPLE, samples=samples, **kw)
+                assert not any("分割数が粗く" in w for w in k.warnings), \
+                    (shape, diameter, nozzle, samples, k.warnings)
+
+    # 既定(50mm)ではどちらのノズルでも引き上げ不要
+    assert kc.samples_for_nozzle(320, 0.4) == 320
+    assert kc.samples_for_nozzle(320, 0.2) == 320
+    # 100mm を 0.2mm で刷るなら引き上げる
+    assert kc.samples_for_nozzle(320, 0.2, diameter=100.0) > 500
+    # 引き上げない場合は従来どおり警告が出る
+    k = kc.build_keychain(SAMPLE, diameter=100.0, nozzle=0.2, samples=320)
+    assert any("分割数が粗く" in w for w in k.warnings)
+
+
 def test_flat_frame_warns():
     """枠が凹凸より高くない = レジンだまりが無い"""
     k = kc.build_keychain(SAMPLE, shape="square", max_thickness=2.4,

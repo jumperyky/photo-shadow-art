@@ -157,6 +157,12 @@ export default function Page() {
   const patchKeychain = useCallback((p: Partial<KeychainParams>) => {
     setKeychainParams((prev) => ({ ...prev, ...p }));
   }, []);
+  // ノズル径は作品ではなくプリンタの設定なので、リソフェインとキーホルダーで
+  // 常に同じ値にする。「初期値に戻す」でも戻さない。
+  const setNozzle = useCallback((nozzle: number) => {
+    setLithoParams((prev) => ({ ...prev, nozzle }));
+    setKeychainParams((prev) => ({ ...prev, nozzle }));
+  }, []);
 
   // -------------------------------------------------------------- 顔検出
   const runFaceDetect = useCallback(
@@ -528,7 +534,13 @@ export default function Page() {
               <KeychainParamPanel
                 params={keychainParams}
                 onChange={patchKeychain}
-                onReset={() => setKeychainParams(DEFAULT_KEYCHAIN)}
+                onNozzleChange={setNozzle}
+                onReset={() =>
+                  setKeychainParams((prev) => ({
+                    ...DEFAULT_KEYCHAIN,
+                    nozzle: prev.nozzle,
+                  }))
+                }
                 size={preview?.size ?? null}
                 faceAvailable={faceAvailable}
                 faceBusy={faceBusy}
@@ -543,7 +555,13 @@ export default function Page() {
               <LithophaneParamPanel
                 params={lithoParams}
                 onChange={patchLitho}
-                onReset={() => setLithoParams(DEFAULT_LITHOPHANE)}
+                onNozzleChange={setNozzle}
+                onReset={() =>
+                  setLithoParams((prev) => ({
+                    ...DEFAULT_LITHOPHANE,
+                    nozzle: prev.nozzle,
+                  }))
+                }
                 size={preview?.size ?? null}
                 faceAvailable={faceAvailable}
                 faceBusy={faceBusy}

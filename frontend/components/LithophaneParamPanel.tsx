@@ -1,6 +1,7 @@
 "use client";
 
 import { Message, Slider, Toggle } from "./Controls";
+import { NozzlePicker } from "./NozzlePicker";
 import { MAX_PRINT_SIZE_MM } from "@/lib/defaults";
 import type { LithophaneParams, SizeInfo } from "@/lib/types";
 
@@ -11,6 +12,7 @@ import type { LithophaneParams, SizeInfo } from "@/lib/types";
 export function LithophaneParamPanel({
   params,
   onChange,
+  onNozzleChange,
   onReset,
   size,
   faceAvailable,
@@ -20,6 +22,8 @@ export function LithophaneParamPanel({
 }: {
   params: LithophaneParams;
   onChange: (patch: Partial<LithophaneParams>) => void;
+  /** ノズル径はプリンタ側の設定なので、モードをまたいで共有する */
+  onNozzleChange: (nozzle: number) => void;
   onReset: () => void;
   size: SizeInfo | null;
   faceAvailable: boolean;
@@ -104,6 +108,12 @@ export function LithophaneParamPanel({
               ? `格子 ${size.grid} / 三角形 約${((size.face_count ?? 0) / 1000).toFixed(0)}k。多いほど精細でファイルも大きくなります`
               : "多いほど精細になり、STLのファイルサイズも大きくなります"
           }
+        />
+        <NozzlePicker
+          value={params.nozzle}
+          onChange={onNozzleChange}
+          samples={params.samples}
+          size={size}
         />
       </div>
 

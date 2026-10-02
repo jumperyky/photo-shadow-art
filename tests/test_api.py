@@ -440,6 +440,74 @@ def test_lithophane_side_supports_reach_mesh_and_stl():
     assert abs(reported[2] - span[1]) < 0.01
 
 
+def test_lithophane_nozzle_raises_samples_to_match():
+    """
+    ノズルを 0.2mm に替えると、格子がノズルより粗くならないよう分割数が
+    引き上がること。0.4mm では既定の 400 のまま(従来どおり)。
+    """
+    image_id = upload()
+    base = {"mode": "lithophane", "image_id": image_id, "width": 100,
+            "samples": 400}
+
+    coarse = client.post("/api/preview", json={**base, "nozzle": 0.4}).json()
+    assert coarse["size"]["grid"].startswith("400 x ")
+    assert coarse["size"]["samples_used"] == 400
+    assert coarse["size"]["printable_px"] == 250
+
+    fine = client.post("/api/preview", json={**base, "nozzle": 0.2}).json()
+    assert fine["size"]["grid"].startswith("500 x "), fine["size"]["grid"]
+    assert fine["size"]["samples_used"] == 500
+    assert fine["size"]["grid_px"] == 500
+    assert fine["size"]["printable_px"] == 500
+    assert fine["size"]["face_count"] > coarse["size"]["face_count"]
+    assert not any("ノズル径" in w for w in fine["warnings"])
+
+    # 省略時は 0.4mm
+    default = client.post("/api/preview", json=base).json()
+    assert default["size"] == coarse["size"]
+    # 外形は変わらない(変わるのは格子の細かさだけ)
+    for key in ("outer_width_mm", "outer_height_mm", "outer_depth_mm"):
+        assert fine["size"][key] == coarse["size"][key], key
+
+
+def test_lithophane_nozzle_raise_is_capped():
+    """幅が大きいときは 600 で止め、足りないぶんは警告で知らせること"""
+    image_id = upload()
+    body = client.post("/api/preview", json={
+        "mode": "lithophane", "image_id": image_id, "width": 300,
+        "samples": 400, "nozzle": 0.2,
+    }).json()
+    assert body["size"]["samples_used"] == 600
+    assert body["size"]["printable_px"] == 1500
+    assert any("ノズル径" in w for w in body["warnings"]), body["warnings"]
+
+
+def test_lithophane_stl_uses_nozzle_fitted_samples():
+    """STLも同じ分割数で出ること。品質の倍率は引き上げ後の値に掛かる。"""
+    import lithophane_stl as lp
+
+    image_id = upload()
+    base = {"mode": "lithophane", "image_id": image_id, "width": 40,
+            "samples": 100, "nozzle": 0.2}   # 40 / 0.2 = 200 列が必要
+    for quality, columns in (("normal", 200), ("draft", 100)):
+        res = client.post("/api/stl", json={**base, "quality": quality})
+        assert res.status_code == 200, res.text
+        expected = lp.face_count_for(*lp.grid_shape(600, 800, columns))
+        assert int(res.headers["x-face-count"]) == expected, quality
+
+
+def test_keychain_nozzle_raises_samples_when_large():
+    image_id = upload()
+    base = {"mode": "keychain", "image_id": image_id, "shape": "circle",
+            "diameter": 100, "samples": 320}
+    coarse = client.post("/api/preview", json={**base, "nozzle": 0.4}).json()
+    fine = client.post("/api/preview", json={**base, "nozzle": 0.2}).json()
+    assert coarse["size"]["samples_used"] == 320
+    assert fine["size"]["samples_used"] > 500
+    assert fine["size"]["grid_px"] >= fine["size"]["printable_px"] == 500
+    assert not any("分割数が粗く" in w for w in fine["warnings"])
+
+
 def test_lithophane_quality_changes_resolution():
     """品質設定で分割数が変わること"""
     image_id = upload()

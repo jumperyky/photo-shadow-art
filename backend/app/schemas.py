@@ -115,6 +115,9 @@ class LithophaneParams(CommonParams):
     positive: bool = False
     # 立てて印刷するときの揺れ止め(左右のフィン)。湾曲させたときは付かない。
     side_supports: bool = False
+    # ノズル径。形状は変えず、格子がノズルより粗いときに分割数を引き上げる
+    # (キーホルダーの nozzle と同じ意味)。
+    nozzle: float = Field(default=0.4, gt=0.0, le=2.0)
 
     # リソフェインは暗部の階調を出すため 1未満が定番
     gamma: float = Field(default=0.8, gt=0.0, le=5.0)
@@ -150,7 +153,8 @@ class KeychainParams(CommonParams):
     hole_diameter: float = Field(default=3.5, gt=0.0, le=50.0)
     ring_margin: float = Field(default=2.5, gt=0.0, le=50.0)
     samples: int = Field(default=320, ge=8, le=800)
-    # ノズル径。ジオメトリには影響せず、印刷できる横解像度の判定にだけ使う。
+    # ノズル径。形状は変えず、印刷できる横解像度の判定と、格子がノズルより
+    # 粗いときに分割数を引き上げるのに使う。
     # 立てて印刷するので横方向はここで頭打ちになる。
     nozzle: float = Field(default=0.4, gt=0.0, le=2.0)
 
@@ -280,11 +284,17 @@ class SizeInfo(BaseModel):
     face_count: Optional[int] = None
     radius_mm: Optional[float] = None   # 湾曲時の内側半径
 
+    # リソフェイン・キーホルダー共通(ノズル径まわり)
+    # 実際に使う分割数。ノズル径に合わせて指定値より引き上げられることがある
+    # (出力品質の倍率を掛ける前の値)。
+    samples_used: Optional[int] = None
+
     # キーホルダー専用
     frame_thickness_mm: Optional[float] = None   # 枠の高さ(=最大厚み+レジンだまり)
     well_depth_mm: Optional[float] = None        # レジンだまりの深さ
     hole_diameter_mm: Optional[float] = None
     resin_volume_ml: Optional[float] = None      # 必要なレジンの量の目安
+    # 以下の2つはリソフェインでも埋める
     printable_px: Optional[int] = None           # 実際に印刷できる横解像度(ノズル径で決まる)
     grid_px: Optional[int] = None                # メッシュの格子の列数(印刷の細かさではない)
 
